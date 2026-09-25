@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TCK Juniorentraining – Anmeldung & Planung</title>
+  <style>
+    :root{
+      --bg:#f4f7fb; --card:#ffffff; --text:#172033; --muted:#667085;
+      --primary:#1f6f54; --primary2:#155c45; --line:#e4e7ec;
+      --red:#ef4444; --orange:#f59e0b; --green:#22c55e; --blue:#3b82f6;
+      --shadow:0 10px 30px rgba(16,24,40,.08);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    a{color:var(--primary)}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    .hidden{display:none!important}
+    .app{min-height:100vh}
+    header{
+      background:linear-gradient(135deg,#154f3c,#248261);
+      color:white;padding:22px 28px;display:flex;justify-content:space-between;align-items:center;
+      gap:16px;box-shadow:var(--shadow)
+    }
+    .brand h1{font-size:22px;margin:0 0 4px}
+    .brand small{opacity:.85}
+    .header-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .staff-entry{position:relative}
+    .staff-menu{position:absolute;right:0;top:calc(100% + 8px);min-width:300px;background:white;color:var(--text);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:8px;z-index:30}
+    .staff-menu button{width:100%;text-align:left;border:0;background:white;padding:11px 12px;border-radius:9px;font-weight:700;color:var(--text)}
+    .staff-menu button:hover{background:#eef4f1;color:var(--primary)}
+    .pill{background:rgba(255,255,255,.15);padding:7px 10px;border-radius:999px;font-size:13px}
+    .ghost{background:white;color:var(--primary);border:0;border-radius:10px;padding:9px 12px;font-weight:700}
+    .container{max-width:1440px;margin:0 auto;padding:24px}
+    .login-wrap{max-width:560px;margin:60px auto}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:20px}
+    h2,h3{margin-top:0}
+    .grid{display:grid;gap:18px}
+    .grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .form-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}
+    input,select,textarea{
+      width:100%;border:1px solid #d0d5dd;border-radius:10px;padding:10px 12px;background:white
+    }
+    textarea{min-height:88px;resize:vertical}
+    .btn{border:0;border-radius:10px;padding:10px 14px;font-weight:700}
+    .btn-primary{background:var(--primary);color:white}
+    .btn-primary:hover{background:var(--primary2)}
+    .btn-secondary{background:#eef4f1;color:var(--primary)}
+    .btn-danger{background:#fee2e2;color:#991b1b}
+    .btn-warning{background:#fff7ed;color:#9a3412}
+    .btn-sm{padding:7px 10px;font-size:13px}
+    .toolbar{display:flex;gap:10px;align-items:end;justify-content:space-between;flex-wrap:wrap;margin-bottom:18px}
+    .toolbar .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+    .notice{border-left:4px solid var(--primary);background:#eef7f3;padding:12px 14px;border-radius:8px;color:#27463b}
+    .muted{color:var(--muted);font-size:13px}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+    .tab{border:1px solid var(--line);background:white;padding:9px 13px;border-radius:10px}
+    .tab.active{background:var(--primary);color:white;border-color:var(--primary)}
+    .week{overflow-x:auto}
+    .week-grid{display:grid;grid-template-columns:110px repeat(3,minmax(260px,1fr));min-width:960px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+    .week-grid>div{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px;background:white}
+    .week-grid .head{background:#f8fafc;font-weight:800;text-align:center}
+    .time{background:#f8fafc!important;font-weight:700;color:#475467}
+    .slot{
+      border:1px solid #d6e7df;border-radius:12px;padding:10px;margin:4px 0;background:#f7fbf9
+    }
+    .slot.full{border-color:#fecaca;background:#fff7f7}
+    .slot .slot-title{display:flex;justify-content:space-between;gap:8px;font-weight:800;margin-bottom:4px}
+    .slot .meta{font-size:12px;color:var(--muted);line-height:1.5}
+    .level{display:inline-block;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:800}
+    .level-rot{background:#fee2e2;color:#991b1b}
+    .level-orange{background:#ffedd5;color:#9a3412}
+    .level-gruen{background:#dcfce7;color:#166534}
+    .level-wettkampf{background:#dbeafe;color:#1d4ed8}
+    table{width:100%;border-collapse:collapse}
+    th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+    th{font-size:12px;text-transform:uppercase;color:#667085;background:#f8fafc}
+    .status{font-size:12px;font-weight:800;border-radius:999px;padding:4px 8px;display:inline-block}
+    .s-pending{background:#fff7ed;color:#9a3412}
+    .s-accepted{background:#dcfce7;color:#166534}
+    .s-rejected{background:#fee2e2;color:#991b1b}
+    .s-moved{background:#dbeafe;color:#1d4ed8}
+    .kpi{padding:16px;border-radius:14px;background:white;border:1px solid var(--line)}
+    .kpi strong{display:block;font-size:28px;margin-top:6px}
+    .modal{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:20}
+    .modal-box{width:min(720px,100%);max-height:90vh;overflow:auto;background:white;border-radius:16px;padding:22px}
+    .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+    .footer-note{margin-top:18px;color:#667085;font-size:12px}
+    @media(max-width:800px){
+      .grid-2,.grid-3,.form-row{grid-template-columns:1fr}
+      header{align-items:flex-start;flex-direction:column}
+      .container{padding:14px}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <h1>TCK Juniorentraining</h1>
+      <small>Anmeldung, Wochenplanung und Bewerbungsverwaltung</small>
+    </div>
+    <div class="header-actions">
+      <div class="staff-entry" id="staffEntry">
+        <button class="ghost" id="staffLoginBtn" onclick="toggleStaffMenu(event)">Anmelden</button>
+        <div class="staff-menu hidden" id="staffMenu">
+          <button onclick="openStaffLogin('coach')">Tennislehrer / J&amp;S Coach / Juniorenobmann</button>
+          <button onclick="openStaffLogin('admin')">Admin</button>
+        </div>
+      </div>
+      <span class="pill" id="sessionInfo">Nicht angemeldet</span>
+      <button class="ghost hidden" id="logoutBtn" onclick="logout()">Abmelden</button>
+    </div>
+  </header>
+
+  <main class="container">
+    <section id="loginView" class="login-wrap">
+      <div class="card">
+        <h2>Eltern / Interessenten</h2>
+        <p class="muted">Bestehende Benutzer melden sich an. Neue Interessenten erstellen zuerst einen Zugang.</p>
+        <div id="supabaseConfigNotice" class="notice" style="margin-top:12px;display:none">
+          <strong>Supabase noch nicht konfiguriert.</strong><br>
+          Tragen Sie in der HTML-Datei <code>SUPABASE_URL</code> und <code>SUPABASE_PUBLISHABLE_KEY</code> ein.
+        </div>
+        <script>
+          window.addEventListener("DOMContentLoaded",()=>{
+            const n=document.getElementById("supabaseConfigNotice");
+            if(n && !supabaseConfigured) n.style.display="block";
+          });
+        </script>
+
+        <div class="tabs" style="margin-top:14px">
+          <button class="tab active" id="parentLoginTab" onclick="showParentAccess('login')">Anmelden</button>
+          <button class="tab" id="parentRegisterTab" onclick="showParentAccess('register')">Neuanmeldung</button>
+        </div>
+
+        <div id="parentLoginPane" class="grid">
+          <div>
+            <label>E-Mail</label>
+            <input id="loginEmail" type="email" placeholder="name@example.ch" />
+          </div>
+          <div>
+            <label>Passwort</label>
+            <input id="loginPassword" type="password" placeholder="Passwort" />
+          </div>
+          <button class="btn btn-primary" onclick="login()">Anmelden</button>
+          <button class="btn btn-secondary" onclick="openForgotPassword()">Passwort vergessen?</button>
+          <div class="footer-note">Anmeldung mit dem Passwort, das nach der E-Mail-Aktivierung festgelegt wurde.</div>
+        </div>
+
+        <div id="parentRegisterPane" class="grid hidden">
+          <div>
+            <label>Name Eltern / Kontaktperson</label>
+            <input id="registerParentName" type="text" placeholder="Vorname Nachname" />
+          </div>
+          <div>
+            <label>E-Mail</label>
+            <input id="registerEmail" type="email" placeholder="name@example.ch" />
+          </div>
+          <button class="btn btn-primary" onclick="sendRegistrationLink()">Registrierungslink senden</button>
+          <div class="notice">
+            Das Passwort wird nicht per E-Mail verschickt. Der neue Benutzer erhält einen persönlichen Link und legt sein Passwort selbst fest.
+          </div>
+          <div class="footer-note">Die E-Mail wird über Supabase Auth versendet. Für beliebige externe E-Mail-Adressen muss in Supabase ein eigener SMTP-Dienst eingerichtet werden.</div>
+        </div>
+
+        <div id="registrationSentPane" class="hidden">
+          <div class="notice">
+            <strong>Registrierungs-E-Mail versendet.</strong><br>
+            Wir haben einen persönlichen Link an <span id="registrationSentEmail"></span> gesendet.
+          </div>
+          <p class="muted" style="margin-top:14px">Der Link sollte zeitlich begrenzt und nur einmal verwendbar sein.</p>
+          <button class="btn btn-secondary" style="width:100%;margin-top:10px" onclick="showParentAccess('login')">Zur Anmeldung</button>
+        </div>
+
+        <div class="footer-note">Tennislehrer, J&amp;S Coach, Juniorenobmann und Admin melden sich oben rechts an.</div><div class="footer-note"><strong>Supabase:</strong> Passwörter und Sitzungen werden durch Supabase Auth verwaltet und nicht im localStorage dieser Anwendung gespeichert.</div>
+      </div>
+    </section>
+
+    <section id="appView" class="hidden">
+      <div class="toolbar">
+        <div class="filters">
+          <div>
+            <label>Trainingsperiode</label>
+            <select id="seasonSelect" onchange="renderAll()"></select>
+          </div>
+          <div id="parentChildFilterWrap">
+            <label>Spielstärke</label>
+            <select id="levelFilter" onchange="renderWeek()">
+              <option value="all">Alle</option>
+              <option value="rot">Rot</option>
+              <option value="orange">Orange</option>
+              <option value="gruen">Grün</option>
+              <option value="wettkampf">Wettkampf</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <button class="btn btn-secondary" onclick="openInfo()">Spielstärken & Trainingsinfo</button>
+        </div>
+      </div>
+
+      <div id="roleTabs" class="tabs"></div>
+      <div id="content"></div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden" onclick="closeModalOutside(event)">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* =========================================================
+   SUPABASE KONFIGURATION
+   1. Project URL aus Supabase > Project Settings > API
+   2. Publishable Key (sb_publishable_...) hier eintragen
+   WICHTIG: Niemals den service_role Key im Browser verwenden.
+   ========================================================= */
+const SUPABASE_URL = "https://hjolpnovopamdcurkdag.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_sLJejcjsPNruTnHrdiUgUw_N0AcBmnu";
+
+const supabaseConfigured =
+  !SUPABASE_URL.includes("DEIN-PROJEKT") &&
+  !SUPABASE_PUBLISHABLE_KEY.includes("DEIN_PUBLISHABLE_KEY");
+
+const authClient = supabaseConfigured
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    })
+  : null;
+
+const seed = {
+  seasons: [
+    {id:"winter-2026",name:"Wintertraining 2026/27",type:"Winter",active:true, registrationOpen:true},
+    {id:"summer-2027",name:"Sommertraining 2027",type:"Sommer",active:false, registrationOpen:true}
+  ],
+  slots: [
+    // Winter Mo 16-19
+    {id:"w-mo-16-a",season:"winter-2026",day:"Montag",date:"2026-10-19",time:"16:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:420,coach:"Philippe",participants:2},
+    {id:"w-mo-16-b",season:"winter-2026",day:"Montag",date:"2026-10-19",time:"16:00",duration:60,group:"Gruppe B",level:"orange",capacity:6,cost:420,coach:"Nina",participants:5},
+    {id:"w-mo-17-a",season:"winter-2026",day:"Montag",date:"2026-10-19",time:"17:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:480,coach:"Philippe",participants:4},
+    {id:"w-mo-18-a",season:"winter-2026",day:"Montag",date:"2026-10-19",time:"18:00",duration:60,group:"Gruppe A",level:"wettkampf",capacity:6,cost:560,coach:"Philippe",participants:6},
+    // Winter Mi 13-18
+    {id:"w-mi-13-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"13:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:420,coach:"Lea",participants:1},
+    {id:"w-mi-14-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"14:00",duration:60,group:"Gruppe A",level:"orange",capacity:6,cost:420,coach:"Lea",participants:3},
+    {id:"w-mi-15-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"15:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:480,coach:"Philippe",participants:4},
+    {id:"w-mi-16-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"16:00",duration:60,group:"Gruppe A",level:"wettkampf",capacity:6,cost:560,coach:"Philippe",participants:5},
+    {id:"w-mi-17-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"17:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:480,coach:"Nina",participants:2},
+    // Winter Fr 16-20
+    {id:"w-fr-16-a",season:"winter-2026",day:"Freitag",date:"2026-10-23",time:"16:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:420,coach:"Lea",participants:3},
+    {id:"w-fr-17-a",season:"winter-2026",day:"Freitag",date:"2026-10-23",time:"17:00",duration:60,group:"Gruppe A",level:"orange",capacity:6,cost:420,coach:"Nina",participants:5},
+    {id:"w-fr-18-a",season:"winter-2026",day:"Freitag",date:"2026-10-23",time:"18:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:480,coach:"Philippe",participants:4},
+    {id:"w-fr-19-a",season:"winter-2026",day:"Freitag",date:"2026-10-23",time:"19:00",duration:60,group:"Gruppe A",level:"wettkampf",capacity:6,cost:560,coach:"Philippe",participants:3},
+
+    // Summer examples, including parallel groups
+    {id:"s-mo-16-a",season:"summer-2027",day:"Montag",date:"2027-05-03",time:"16:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:390,coach:"Lea",participants:2},
+    {id:"s-mo-16-b",season:"summer-2027",day:"Montag",date:"2027-05-03",time:"16:00",duration:60,group:"Gruppe B",level:"orange",capacity:6,cost:390,coach:"Nina",participants:4},
+    {id:"s-mo-16-c",season:"summer-2027",day:"Montag",date:"2027-05-03",time:"16:00",duration:60,group:"Gruppe C",level:"gruen",capacity:6,cost:450,coach:"Philippe",participants:5},
+    {id:"s-mi-13-a",season:"summer-2027",day:"Mittwoch",date:"2027-05-05",time:"13:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:390,coach:"Lea",participants:1},
+    {id:"s-mi-15-a",season:"summer-2027",day:"Mittwoch",date:"2027-05-05",time:"15:00",duration:90,group:"Gruppe A",level:"wettkampf",capacity:6,cost:540,coach:"Philippe",participants:4},
+    {id:"s-fr-16-a",season:"summer-2027",day:"Freitag",date:"2027-05-07",time:"16:00",duration:60,group:"Gruppe A",level:"orange",capacity:6,cost:390,coach:"Nina",participants:2},
+    {id:"s-fr-18-a",season:"summer-2027",day:"Freitag",date:"2027-05-07",time:"18:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:450,coach:"Philippe",participants:3}
+  ],
+  applications: [
+    {id:"a1",season:"winter-2026",slotId:"w-mi-15-a",parentName:"Muster Familie",email:"muster@example.ch",mobile:"+41 79 000 00 00",child:"Luca Muster",birthYear:2014,level:"gruen",status:"pending",comment:"Mittwoch wäre ideal.",coachComment:"",created:"2026-09-05"},
+    {id:"a2",season:"winter-2026",slotId:"w-fr-17-a",parentName:"Sandra Beispiel",email:"sandra@example.ch",mobile:"+41 78 111 11 11",child:"Mia Beispiel",birthYear:2016,level:"orange",status:"accepted",comment:"",coachComment:"Willkommen im Freitagstraining.",created:"2026-09-03"}
+  ],
+  contacts: [
+    {id:"c1",child:"Luca Muster",parentName:"Muster Familie",email:"muster@example.ch",mobile:"+41 79 000 00 00",level:"gruen",source:"Clubdesk"},
+    {id:"c2",child:"Mia Beispiel",parentName:"Sandra Beispiel",email:"sandra@example.ch",mobile:"+41 78 111 11 11",level:"orange",source:"Clubdesk"}
+  ]
+};
+
+let db = JSON.parse(localStorage.getItem("tckJuniorApp") || "null") || seed;
+let session = {role:null,email:null,tab:null};
+
+function save(){ localStorage.setItem("tckJuniorApp", JSON.stringify(db)); }
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]));}
+function currentSeason(){ return document.getElementById("seasonSelect").value || db.seasons[0].id; }
+function seasonObj(){ return db.seasons.find(s=>s.id===currentSeason()); }
+function levelLabel(l){ return ({rot:"Rot",orange:"Orange",gruen:"Grün",wettkampf:"Wettkampf"})[l]||l; }
+function formatDate(date){
+  if(!date) return "Datum noch nicht festgelegt";
+  const [y,m,d]=date.split("-");
+  return `${d}.${m}.${y}`;
+}
+function slotDate(s){ return formatDate(s.date); }
+function weekdayFromDate(date){
+  if(!date) return "";
+  const [y,m,d]=date.split("-").map(Number);
+  const names=["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
+  return names[new Date(y,m-1,d).getDay()];
+}
+function slotDay(s){ return weekdayFromDate(s.date) || s.day || ""; }
+
+
+
+function showParentAccess(mode){
+  const isLogin=mode==="login";
+  document.getElementById("parentLoginPane").classList.toggle("hidden", !isLogin);
+  document.getElementById("parentRegisterPane").classList.toggle("hidden", isLogin);
+  document.getElementById("registrationSentPane").classList.add("hidden");
+  document.getElementById("parentLoginTab").classList.toggle("active", isLogin);
+  document.getElementById("parentRegisterTab").classList.toggle("active", !isLogin);
+}
+
+function requireSupabase(){
+  if(authClient) return true;
+  alert("Supabase ist noch nicht konfiguriert. Bitte SUPABASE_URL und SUPABASE_PUBLISHABLE_KEY oben in der HTML-Datei eintragen.");
+  return false;
+}
+
+function redirectUrl(mode){
+  if(location.protocol==="file:"){
+    alert("Für echte E-Mail-Links muss diese HTML-Datei über http://localhost oder eine https://Webadresse geöffnet werden – nicht direkt als file:// Datei.");
+  }
+  const url=new URL(location.href);
+  url.hash="";
+  url.search="";
+  url.searchParams.set("auth",mode);
+  return url.toString();
+}
+
+async function sendRegistrationLink(){
+  if(!requireSupabase()) return;
+  const name=document.getElementById("registerParentName").value.trim();
+  const email=document.getElementById("registerEmail").value.trim();
+  if(!name || !email){ alert("Bitte Name und E-Mail ausfüllen."); return; }
+
+  const { error } = await authClient.auth.signInWithOtp({
+    email,
+    options:{
+      shouldCreateUser:true,
+      emailRedirectTo:redirectUrl("activate"),
+      data:{ name, role:"parent" }
+    }
+  });
+
+  if(error){
+    alert("Registrierungs-E-Mail konnte nicht gesendet werden: "+error.message);
+    return;
+  }
+
+  document.getElementById("parentLoginPane").classList.add("hidden");
+  document.getElementById("parentRegisterPane").classList.add("hidden");
+  document.getElementById("registrationSentPane").classList.remove("hidden");
+  document.getElementById("registrationSentEmail").textContent=email;
+}
+
+async function login(){
+  if(!requireSupabase()) return;
+  const email=(document.getElementById("loginEmail").value || "").trim();
+  const password=document.getElementById("loginPassword").value;
+  if(!email || !password){ alert("Bitte E-Mail und Passwort eingeben."); return; }
+
+  const { data, error } = await authClient.auth.signInWithPassword({ email, password });
+  if(error){
+    alert("E-Mail oder Passwort ist nicht korrekt.");
+    return;
+  }
+
+  const role=data.user?.app_metadata?.role;
+  if(role==="coach" || role==="admin"){
+    await authClient.auth.signOut();
+    alert("Dieser Zugang gehört zum Juniorenteam/Admin. Bitte oben rechts anmelden.");
+    return;
+  }
+  enterSession("parent", data.user.email);
+}
+
+function openSetPassword(mode){
+  const title=mode==="recovery" ? "Neues Passwort festlegen" : "Zugang aktivieren";
+  openModal(`<h2>${title}</h2>
+    <p class="muted">${mode==="recovery" ? "Wählen Sie ein neues Passwort." : "Legen Sie jetzt Ihr persönliches Passwort fest."}</p>
+    <div class="grid">
+      <div><label>Neues Passwort</label><input id="newAuthPassword" type="password" placeholder="Mindestens 6 Zeichen"></div>
+      <div><label>Passwort bestätigen</label><input id="newAuthPassword2" type="password" placeholder="Passwort wiederholen"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveSupabasePassword('${mode}')">Passwort speichern</button>
+    </div>`);
+}
+
+async function saveSupabasePassword(mode){
+  if(!requireSupabase()) return;
+  const pw=document.getElementById("newAuthPassword").value;
+  const pw2=document.getElementById("newAuthPassword2").value;
+  if(!pw || pw.length<6){ alert("Bitte ein Passwort mit mindestens 6 Zeichen wählen."); return; }
+  if(pw!==pw2){ alert("Die Passwörter stimmen nicht überein."); return; }
+
+  const { data, error } = await authClient.auth.updateUser({ password:pw });
+  if(error){
+    alert("Passwort konnte nicht gespeichert werden: "+error.message);
+    return;
+  }
+
+  closeModal();
+  const clean=new URL(location.href);
+  clean.searchParams.delete("auth");
+  clean.hash="";
+  history.replaceState({}, "", clean.pathname + (clean.search ? clean.search : ""));
+  enterSession("parent", data.user.email);
+}
+
+function openForgotPassword(){
+  const email=document.getElementById("loginEmail").value.trim();
+  openModal(`<h2>Passwort vergessen?</h2>
+    <p class="muted">Supabase sendet einen Link zum Festlegen eines neuen Passworts.</p>
+    <div><label>E-Mail</label><input id="forgotEmail" type="email" value="${esc(email)}" placeholder="name@example.ch"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="sendPasswordReset()">Reset-Link senden</button>
+    </div>`);
+}
+
+async function sendPasswordReset(){
+  if(!requireSupabase()) return;
+  const email=document.getElementById("forgotEmail").value.trim();
+  if(!email){ alert("Bitte E-Mail eingeben."); return; }
+
+  const { error } = await authClient.auth.resetPasswordForEmail(email,{
+    redirectTo:redirectUrl("recovery")
+  });
+
+  closeModal();
+  if(error){
+    alert("Reset-E-Mail konnte nicht gesendet werden: "+error.message);
+    return;
+  }
+
+  openModal(`<h2>E-Mail prüfen</h2>
+    <div class="notice">Falls für <strong>${esc(email)}</strong> ein Zugang besteht, wurde ein Link zum Zurücksetzen des Passworts gesendet.</div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+}
+
+function toggleStaffMenu(event){
+  if(event) event.stopPropagation();
+  document.getElementById("staffMenu").classList.toggle("hidden");
+}
+
+function openStaffLogin(role){
+  document.getElementById("staffMenu").classList.add("hidden");
+  const title=role==="admin" ? "Admin" : "Tennislehrer / J&S Coach / Juniorenobmann";
+  openModal(`<h2>${title} – Anmeldung</h2>
+    <div class="grid">
+      <div><label>E-Mail</label><input id="staffPopupEmail" type="email" placeholder="name@tck.ch"></div>
+      <div><label>Passwort</label><input id="staffPopupPassword" type="password" placeholder="Passwort"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="submitStaffLogin('${role}')">Anmelden</button>
+    </div>`);
+  setTimeout(()=>document.getElementById("staffPopupEmail")?.focus(),0);
+}
+
+async function submitStaffLogin(role){
+  if(!requireSupabase()) return;
+  const email=document.getElementById("staffPopupEmail").value.trim();
+  const password=document.getElementById("staffPopupPassword").value;
+  if(!email || !password){ alert("Bitte E-Mail und Passwort eingeben."); return; }
+
+  const { data, error } = await authClient.auth.signInWithPassword({email,password});
+  if(error){
+    alert("E-Mail oder Passwort ist nicht korrekt.");
+    return;
+  }
+
+  const storedRole=data.user?.app_metadata?.role;
+  if(storedRole!==role){
+    await authClient.auth.signOut();
+    alert(role==="admin"
+      ? "Dieser Benutzer besitzt keine Admin-Berechtigung."
+      : "Dieser Benutzer besitzt keine Berechtigung für das Juniorenteam.");
+    return;
+  }
+
+  closeModal();
+  enterSession(role,data.user.email);
+}
+
+function enterSession(role,email){
+  session.role = role;
+  session.email = email;
+  session.tab = session.role==="parent" ? "week" : session.role==="coach" ? "applications" : "setup";
+  document.getElementById("loginView").classList.add("hidden");
+  document.getElementById("appView").classList.remove("hidden");
+  document.getElementById("logoutBtn").classList.remove("hidden");
+  document.getElementById("staffEntry").classList.add("hidden");
+  const labels={parent:"Eltern",coach:"Headcoach / Juniorenteam",admin:"Admin"};
+  document.getElementById("sessionInfo").textContent=`${labels[session.role]} · ${session.email}`;
+  fillSeasons();
+  renderTabs();
+  renderAll();
+}
+
+async function logout(){
+  if(authClient) await authClient.auth.signOut();
+  session={role:null,email:null,tab:null};
+  document.getElementById("appView").classList.add("hidden");
+  document.getElementById("loginView").classList.remove("hidden");
+  document.getElementById("logoutBtn").classList.add("hidden");
+  document.getElementById("staffEntry").classList.remove("hidden");
+  document.getElementById("sessionInfo").textContent="Nicht angemeldet";
+  showParentAccess("login");
+}
+
+async function restoreSupabaseSession(){
+  if(!authClient) return;
+  const mode=new URL(location.href).searchParams.get("auth");
+
+  const { data:{session:authSession} } = await authClient.auth.getSession();
+  if(!authSession) return;
+
+  if(mode==="activate"){
+    openSetPassword("activate");
+    return;
+  }
+  if(mode==="recovery"){
+    openSetPassword("recovery");
+    return;
+  }
+
+  const user=authSession.user;
+  const role=user?.app_metadata?.role;
+  if(role==="admin") enterSession("admin",user.email);
+  else if(role==="coach") enterSession("coach",user.email);
+  else enterSession("parent",user.email);
+}
+
+function fillSeasons(){
+  const el=document.getElementById("seasonSelect");
+  const prev=el.value;
+  el.innerHTML=db.seasons.map(s=>`<option value="${s.id}">${esc(s.name)}${s.registrationOpen?" · Anmeldung offen":""}</option>`).join("");
+  if(db.seasons.some(s=>s.id===prev)) el.value=prev;
+}
+function renderTabs(){
+  const tabs = session.role==="parent"
+    ? [["week","Wochenplan"],["myapps","Meine Bewerbungen"],["profile","Kind / Kontakt"]]
+    : session.role==="coach"
+    ? [["applications","Bewerbungen"],["week","Wochenplan"],["participants","Teilnehmer"]]
+    : [["setup","Wochenplan-Setup"],["applications","Bewerbungen"],["contacts","Kontakte"],["export","Abrechnung / Export"]];
+  document.getElementById("roleTabs").innerHTML=tabs.map(([id,label])=>`<button class="tab ${session.tab===id?"active":""}" onclick="setTab('${id}')">${label}</button>`).join("");
+  document.getElementById("parentChildFilterWrap").classList.toggle("hidden", session.role!=="parent" && session.tab!=="week");
+}
+function setTab(t){session.tab=t;renderTabs();renderAll();}
+function renderAll(){
+  if(!session.role) return;
+  if(session.tab==="week") renderWeek();
+  else if(session.tab==="myapps") renderMyApps();
+  else if(session.tab==="profile") renderProfile();
+  else if(session.tab==="applications") renderApplications();
+  else if(session.tab==="participants") renderParticipants();
+  else if(session.tab==="setup") renderSetup();
+  else if(session.tab==="contacts") renderContacts();
+  else if(session.tab==="export") renderExport();
+}
+
+function renderWeek(){
+  const sid=currentSeason(), filter=document.getElementById("levelFilter")?.value||"all";
+  const slots=db.slots.filter(s=>s.season===sid && (filter==="all"||s.level===filter));
+  const days=["Montag","Mittwoch","Freitag"];
+  const times=[...new Set(slots.map(s=>s.time))].sort();
+  let html=`<div class="notice"><strong>${esc(seasonObj().name)}</strong> – ${seasonObj().registrationOpen?"Bewerbungen sind aktuell möglich.":"Anmeldung geschlossen."} Ein Slot ist erst nach Bestätigung durch den Headcoach definitiv.</div><br>`;
+  html+=`<div class="week"><div class="week-grid"><div class="head">Zeit</div>${days.map(d=>`<div class="head">${d}</div>`).join("")}`;
+  times.forEach(t=>{
+    html+=`<div class="time">${t}</div>`;
+    days.forEach(day=>{
+      const list=slots.filter(s=>s.time===t&&slotDay(s)===day);
+      html+=`<div>${list.length?list.map(slotCard).join(""):`<span class="muted">–</span>`}</div>`;
+    });
+  });
+  html+=`</div></div>`;
+  document.getElementById("content").innerHTML=html;
+}
+function slotCard(s){
+  const free=Math.max(0,s.capacity-s.participants);
+  const full=free===0;
+  const action=session.role==="parent" && seasonObj().registrationOpen
+    ? `<button class="btn btn-sm ${full?"btn-warning":"btn-primary"}" onclick="applyForSlot('${s.id}')">${full?"Warteliste":"Bewerben"}</button>`
+    : "";
+  return `<div class="slot ${full?"full":""}">
+    <div class="slot-title"><span>${esc(s.group)}</span><span class="level level-${s.level}">${levelLabel(s.level)}</span></div>
+    <div class="meta"><strong>Datum: ${slotDate(s)}</strong><br>${s.duration} Min · Coach ${esc(s.coach)}<br>${s.participants}/${s.capacity} belegt · <strong>${free} frei</strong><br>Kosten: CHF ${s.cost}</div>
+    <div style="margin-top:8px">${action}</div>
+  </div>`;
+}
+function applyForSlot(slotId){
+  const s=db.slots.find(x=>x.id===slotId);
+  openModal(`<h2>Bewerbung für Trainingsplatz</h2>
+    <p><strong>${slotDay(s)}, ${slotDate(s)}, ${s.time} · ${s.group}</strong><br><span class="level level-${s.level}">${levelLabel(s.level)}</span> · CHF ${s.cost}</p>
+    <div class="form-row">
+      <div><label>Name Eltern / Kontaktperson</label><input id="apParent" value=""></div>
+      <div><label>E-Mail</label><input id="apEmail" type="email" value="${esc(session.email)}"></div>
+      <div><label>Mobile / WhatsApp</label><input id="apMobile"></div>
+      <div><label>Name Kind</label><input id="apChild"></div>
+      <div><label>Jahrgang</label><input id="apBirth" type="number" min="2005" max="2022"></div>
+      <div><label>Spielstärke</label><select id="apLevel">
+        <option value="rot">Rot</option><option value="orange">Orange</option><option value="gruen">Grün</option><option value="wettkampf">Wettkampf</option>
+      </select></div>
+    </div>
+    <div><label>Kommentar / alternative Zeiten</label><textarea id="apComment" placeholder="z.B. Mittwoch bevorzugt, Freitag wäre ebenfalls möglich"></textarea></div>
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="submitApplication('${slotId}')">Bewerbung senden</button></div>`);
+  document.getElementById("apLevel").value=s.level;
+}
+function submitApplication(slotId){
+  const application={
+    id:"a"+Date.now(),season:currentSeason(),slotId,
+    parentName:document.getElementById("apParent").value,
+    email:document.getElementById("apEmail").value,
+    mobile:document.getElementById("apMobile").value,
+    child:document.getElementById("apChild").value,
+    birthYear:Number(document.getElementById("apBirth").value)||null,
+    level:document.getElementById("apLevel").value,status:"pending",
+    comment:document.getElementById("apComment").value,coachComment:"",
+    created:new Date().toISOString().slice(0,10)
+  };
+  if(!application.parentName||!application.email||!application.child){alert("Bitte Name Eltern, E-Mail und Name des Kindes ausfüllen.");return;}
+  db.applications.push(application);
+  if(!db.contacts.some(c=>c.email===application.email&&c.child===application.child)){
+    db.contacts.push({id:"c"+Date.now(),child:application.child,parentName:application.parentName,email:application.email,mobile:application.mobile,level:application.level,source:"Neue Anmeldung"});
+  }
+  save(); closeModal(); alert("Bewerbung wurde erfasst."); renderWeek();
+}
+function renderMyApps(){
+  const apps=db.applications.filter(a=>a.email===session.email);
+  document.getElementById("content").innerHTML=`<div class="card"><h2>Meine Bewerbungen</h2>${apps.length?applicationTable(apps,false):`<p class="muted">Noch keine Bewerbung mit ${esc(session.email)} erfasst.</p>`}</div>`;
+}
+function renderProfile(){
+  document.getElementById("content").innerHTML=`<div class="grid grid-2">
+    <div class="card"><h2>Bestehendes Clubmitglied</h2><p class="muted">In der echten Lösung wird nach E-Mail oder Mobile in Clubdesk gesucht und das Kind ausgewählt.</p>
+      <label>E-Mail oder Mobile suchen</label><input placeholder="name@example.ch oder +41 ...">
+      <button class="btn btn-secondary" style="margin-top:10px" onclick="alert('Demo: Clubdesk-Suche würde hier ausgeführt.')">In Clubdesk suchen</button>
+    </div>
+    <div class="card"><h2>Neuer Interessent</h2><p class="muted">Neue Kontaktdaten werden beim Bewerben automatisch erfasst. Optional könnten sie an Silvan gemeldet oder via API direkt in Clubdesk geschrieben werden.</p>
+      <button class="btn btn-primary" onclick="setTab('week')">Training auswählen</button>
+    </div></div>`;
+}
+
+function renderApplications(){
+  const apps=db.applications.filter(a=>a.season===currentSeason());
+  const pending=apps.filter(a=>a.status==="pending").length;
+  const accepted=apps.filter(a=>a.status==="accepted").length;
+  const other=apps.length-pending-accepted;
+  document.getElementById("content").innerHTML=`<div class="grid grid-3" style="margin-bottom:18px">
+    <div class="kpi">Offen<strong>${pending}</strong></div><div class="kpi">Akzeptiert<strong>${accepted}</strong></div><div class="kpi">Verschoben / Abgelehnt<strong>${other}</strong></div>
+  </div><div class="card"><h2>Bewerbungen ${esc(seasonObj().name)}</h2>${applicationTable(apps,true)}</div>`;
+}
+function applicationTable(apps,withActions){
+  if(!apps.length) return `<p class="muted">Keine Bewerbungen vorhanden.</p>`;
+  return `<div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Kontakt</th><th>Wunschslot</th><th>Status</th><th>Kommentar</th>${withActions?"<th>Aktion</th>":""}</tr></thead><tbody>
+  ${apps.map(a=>{
+    const s=db.slots.find(x=>x.id===a.slotId);
+    return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">Jg. ${a.birthYear||"-"} · ${levelLabel(a.level)}</span></td>
+      <td>${esc(a.parentName)}<br><span class="muted">${esc(a.email)}<br>${esc(a.mobile)}</span></td>
+      <td>${s?`${slotDay(s)}, ${slotDate(s)} · ${s.time}<br><span class="muted">${esc(s.group)} · ${levelLabel(s.level)}</span>`:"Slot gelöscht"}</td>
+      <td><span class="status s-${a.status}">${({pending:"Offen",accepted:"Akzeptiert",rejected:"Abgelehnt",moved:"Verschoben"})[a.status]||a.status}</span></td>
+      <td><span class="muted">${esc(a.comment||"-")}<br>${a.coachComment?`Coach: ${esc(a.coachComment)}`:""}</span></td>
+      ${withActions?`<td><button class="btn btn-sm btn-primary" onclick="reviewApplication('${a.id}')">Bearbeiten</button></td>`:""}
+    </tr>`;
+  }).join("")}</tbody></table></div>`;
+}
+function reviewApplication(id){
+  const a=db.applications.find(x=>x.id===id);
+  const current=db.slots.find(x=>x.id===a.slotId);
+  const alternatives=db.slots.filter(s=>s.season===a.season);
+  openModal(`<h2>Bewerbung bearbeiten</h2>
+    <p><strong>${esc(a.child)}</strong> · ${esc(a.parentName)}<br><span class="muted">${esc(a.email)} · ${esc(a.mobile)}</span></p>
+    <div class="form-row">
+      <div><label>Status</label><select id="rvStatus">
+        <option value="pending">Offen</option><option value="accepted">Akzeptiert</option><option value="moved">Verschoben</option><option value="rejected">Abgelehnt</option>
+      </select></div>
+      <div><label>Trainingsslot</label><select id="rvSlot">${alternatives.map(s=>`<option value="${s.id}">${slotDay(s)}, ${slotDate(s)} · ${s.time} · ${s.group} · ${levelLabel(s.level)}</option>`).join("")}</select></div>
+    </div>
+    <div><label>Kommentar an Eltern</label><textarea id="rvComment">${esc(a.coachComment)}</textarea></div>
+    <div class="notice"><strong>E-Mail-Vorschau:</strong><br>Nach Speichern würde automatisch eine E-Mail an ${esc(a.email)} vorbereitet/versendet. Im echten System via Mail-Provider oder Clubdesk.</div>
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveReview('${id}')">Speichern & E-Mail auslösen</button></div>`);
+  document.getElementById("rvStatus").value=a.status;
+  document.getElementById("rvSlot").value=current?.id||alternatives[0]?.id;
+}
+function saveReview(id){
+  const a=db.applications.find(x=>x.id===id);
+  const oldSlot=db.slots.find(x=>x.id===a.slotId);
+  const newSlotId=document.getElementById("rvSlot").value;
+  const newStatus=document.getElementById("rvStatus").value;
+  if(a.status!=="accepted" && newStatus==="accepted"){
+    const s=db.slots.find(x=>x.id===newSlotId); if(s) s.participants=Math.min(s.capacity,s.participants+1);
+  }
+  if(a.status==="accepted" && (newStatus!=="accepted" || newSlotId!==a.slotId)){
+    if(oldSlot) oldSlot.participants=Math.max(0,oldSlot.participants-1);
+    if(newStatus==="accepted"){ const s=db.slots.find(x=>x.id===newSlotId); if(s) s.participants=Math.min(s.capacity,s.participants+1); }
+  }
+  a.slotId=newSlotId;a.status=newStatus;a.coachComment=document.getElementById("rvComment").value;
+  save(); closeModal(); renderApplications(); alert("Gespeichert. Demo: E-Mail wäre jetzt ausgelöst worden.");
+}
+function renderParticipants(){
+  const apps=db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted");
+  document.getElementById("content").innerHTML=`<div class="card"><h2>Bestätigte Teilnehmer</h2>${applicationTable(apps,false)}</div>`;
+}
+
+function renderSetup(){
+  const slots=db.slots.filter(s=>s.season===currentSeason());
+  document.getElementById("content").innerHTML=`<div class="grid grid-2">
+    <div class="card"><h2>Trainingsperiode</h2>
+      <div class="form-row"><div><label>Name</label><input id="seName" value="${esc(seasonObj().name)}"></div><div><label>Typ</label><select id="seType"><option>Sommer</option><option>Winter</option></select></div></div>
+      <label><input id="seOpen" type="checkbox" style="width:auto" ${seasonObj().registrationOpen?"checked":""}> Anmeldung offen</label>
+      <button class="btn btn-secondary" onclick="saveSeason()">Periode speichern</button>
+      <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+      <h3>Neue Trainingsperiode</h3>
+      <button class="btn btn-primary" onclick="createSeason()">Neue Saison anlegen</button>
+    </div>
+    <div class="card"><h2>Neuen Slot anlegen</h2>
+      <div class="form-row">
+        <div><label>Datum</label><input id="nsDate" type="date" onchange="updateAutoWeekday()"></div>
+        <div><label>Wochentag (automatisch)</label><input id="nsDayAuto" type="text" readonly placeholder="Wird aus Datum berechnet"></div>
+        <div><label>Zeit</label><input id="nsTime" type="time" value="16:00"></div>
+        <div><label>Gruppe</label><input id="nsGroup" value="Gruppe A"></div>
+        <div><label>Spielstärke</label><select id="nsLevel"><option value="rot">Rot</option><option value="orange">Orange</option><option value="gruen">Grün</option><option value="wettkampf">Wettkampf</option></select></div>
+        <div><label>Kapazität</label><input id="nsCapacity" type="number" value="6" min="1" max="12"></div>
+        <div><label>Kosten CHF</label><input id="nsCost" type="number" value="450"></div>
+        <div><label>Dauer Min.</label><input id="nsDuration" type="number" value="60"></div>
+        <div><label>Coach</label><input id="nsCoach" value="Philippe"></div>
+      </div><button class="btn btn-primary" onclick="addSlot()">Slot hinzufügen</button>
+    </div>
+  </div><br><div class="card"><h2>Bestehende Slots</h2><div style="overflow:auto"><table><thead><tr><th>Datum / Tag / Zeit</th><th>Gruppe</th><th>Stufe</th><th>Plätze</th><th>Kosten</th><th>Coach</th><th></th></tr></thead><tbody>
+    ${slots.map(s=>`<tr><td><strong>${slotDate(s)}</strong><br>${s.day} ${s.time}</td><td>${esc(s.group)}</td><td>${levelLabel(s.level)}</td><td>${s.participants}/${s.capacity}</td><td>CHF ${s.cost}</td><td>${esc(s.coach)}</td><td><button class="btn btn-sm btn-danger" onclick="deleteSlot('${s.id}')">Löschen</button></td></tr>`).join("")}
+  </tbody></table></div></div>`;
+  document.getElementById("seType").value=seasonObj().type;
+}
+function saveSeason(){
+  const s=seasonObj();s.name=document.getElementById("seName").value;s.type=document.getElementById("seType").value;s.registrationOpen=document.getElementById("seOpen").checked;save();fillSeasons();renderSetup();
+}
+function createSeason(){
+  const id="season-"+Date.now();
+  db.seasons.push({id,name:"Neue Trainingsperiode",type:"Sommer",active:false,registrationOpen:false});
+  save();fillSeasons();document.getElementById("seasonSelect").value=id;renderSetup();
+}
+function updateAutoWeekday(){
+  const date=document.getElementById("nsDate")?.value;
+  const field=document.getElementById("nsDayAuto");
+  if(field) field.value=weekdayFromDate(date);
+}
+function addSlot(){
+  const date=document.getElementById("nsDate").value;
+  if(!date){ alert("Bitte zuerst ein Datum auswählen."); return; }
+  db.slots.push({
+    id:"slot-"+Date.now(),season:currentSeason(),day:weekdayFromDate(document.getElementById("nsDate").value),date:document.getElementById("nsDate").value,time:document.getElementById("nsTime").value,
+    duration:Number(document.getElementById("nsDuration").value),group:document.getElementById("nsGroup").value,level:document.getElementById("nsLevel").value,
+    capacity:Number(document.getElementById("nsCapacity").value),cost:Number(document.getElementById("nsCost").value),coach:document.getElementById("nsCoach").value,participants:0
+  }); save();renderSetup();
+}
+function deleteSlot(id){
+  if(!confirm("Slot wirklich löschen? Bewerbungen darauf bleiben als Hinweis bestehen.")) return;
+  db.slots=db.slots.filter(s=>s.id!==id);save();renderSetup();
+}
+function renderContacts(){
+  document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Clubdesk-Import / neue Interessenten</span></div><button class="btn btn-secondary" onclick="alert('Demo: CSV/API Import aus Clubdesk')">Clubdesk-Import</button></div>
+  <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Stufe</th><th>Quelle</th></tr></thead><tbody>
+  ${db.contacts.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td>${levelLabel(c.level)}</td><td>${esc(c.source)}</td></tr>`).join("")}
+  </tbody></table></div></div>`;
+}
+function renderExport(){
+  const accepted=db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted");
+  const revenue=accepted.reduce((sum,a)=>{const s=db.slots.find(x=>x.id===a.slotId);return sum+(s?.cost||0)},0);
+  document.getElementById("content").innerHTML=`<div class="grid grid-2"><div class="card"><h2>Abrechnung / Excel-Export</h2>
+    <p>Bestätigte Anmeldungen: <strong>${accepted.length}</strong><br>Planbarer Rechnungsbetrag: <strong>CHF ${revenue}</strong></p>
+    <button class="btn btn-primary" onclick="exportCSV()">CSV für Excel exportieren</button>
+    <p class="muted">Der Export enthält Eltern, Kind, Kontakt, Trainingsslot, Spielstärke und Betrag. In einer produktiven Lösung kann daraus eine direkte Clubdesk-Rechnungserfassung werden.</p>
+  </div><div class="card"><h2>Clubdesk-Integration</h2>
+    <p class="muted">Vorgesehene Schnittstellen:</p>
+    <ul><li>Bestehende Juniorenkontakte importieren / suchen</li><li>Neue Interessenten an Clubdesk übergeben</li><li>Bestätigte Trainings für Rechnungsstellung übertragen</li><li>Optional E-Mail-Versand über Clubdesk oder separaten Maildienst</li></ul>
+  </div></div>`;
+}
+function exportCSV(){
+  const rows=[["Saison","Kind","Eltern","E-Mail","Mobile","Spielstärke","Datum","Tag","Zeit","Gruppe","Coach","Betrag CHF","Status"]];
+  db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted").forEach(a=>{
+    const s=db.slots.find(x=>x.id===a.slotId)||{};
+    rows.push([seasonObj().name,a.child,a.parentName,a.email,a.mobile,levelLabel(a.level),s.date||"",slotDay(s),s.time||"",s.group||"",s.coach||"",s.cost||0,a.status]);
+  });
+  const csv="\ufeff"+rows.map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`TCK_${currentSeason()}_Abrechnung.csv`;a.click();URL.revokeObjectURL(a.href);
+}
+function openInfo(){
+  openModal(`<h2>Spielstärken & Trainingsinformationen</h2>
+    <p><span class="level level-rot">Rot</span> Einstieg / Red Court: spielerischer Aufbau, kurze Felder und altersgerechte Bälle.</p>
+    <p><span class="level level-orange">Orange</span> Orange Court: Technik, Ballwechsel und erste taktische Elemente.</p>
+    <p><span class="level level-gruen">Grün</span> Green Court: Übergang zum ganzen Feld, technisch und taktisch fortgeschritten.</p>
+    <p><span class="level level-wettkampf">Wettkampf</span> Für Juniorinnen und Junioren mit Turnier- und Wettkampffokus.</p>
+    <div class="notice">Die definitiven Definitionen, Trainingsbedingungen und Kosten können hier später mit euren Club-Informationen verlinkt werden.</div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+}
+function openModal(html){document.getElementById("modalBox").innerHTML=html;document.getElementById("modal").classList.remove("hidden")}
+function closeModal(){document.getElementById("modal").classList.add("hidden")}
+function closeModalOutside(e){if(e.target.id==="modal")closeModal()}
+
+if(authClient){
+  authClient.auth.onAuthStateChange((event, authSession)=>{
+    if(event==="PASSWORD_RECOVERY"){
+      setTimeout(()=>openSetPassword("recovery"),0);
+    }
+  });
+  window.addEventListener("load", restoreSupabaseSession);
+}
+
+document.addEventListener("click",e=>{
+  const entry=document.getElementById("staffEntry");
+  const menu=document.getElementById("staffMenu");
+  if(entry && menu && !entry.contains(e.target)) menu.classList.add("hidden");
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){
+    document.getElementById("staffMenu")?.classList.add("hidden");
+    closeModal();
+  }
+});
+</script>
+</body>
+</html>
