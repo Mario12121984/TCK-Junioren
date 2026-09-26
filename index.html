@@ -475,7 +475,8 @@ async function submitStaffLogin(role){
   }
 
   const storedRole=data.user?.app_metadata?.role;
-  if(storedRole!==role){
+  const allowed = storedRole===role || (role==="coach" && storedRole==="admin");
+  if(!allowed){
     await authClient.auth.signOut();
     alert(role==="admin"
       ? "Dieser Benutzer besitzt keine Admin-Berechtigung."
@@ -484,7 +485,9 @@ async function submitStaffLogin(role){
   }
 
   closeModal();
-  enterSession(role,data.user.email);
+  // Admin behält immer die Admin-Rolle und damit sämtliche Rechte,
+  // auch wenn der Einstieg über Tennislehrer / Juniorenobmann erfolgt.
+  enterSession(storedRole==="admin" ? "admin" : role,data.user.email);
 }
 
 function enterSession(role,email){
@@ -547,7 +550,7 @@ function renderTabs(){
     ? [["week","Wochenplan"],["myapps","Meine Bewerbungen"],["profile","Kind / Kontakt"]]
     : session.role==="coach"
     ? [["applications","Bewerbungen"],["week","Wochenplan"],["participants","Teilnehmer"]]
-    : [["setup","Wochenplan-Setup"],["applications","Bewerbungen"],["contacts","Kontakte"],["export","Abrechnung / Export"]];
+    : [["setup","Wochenplan-Setup"],["applications","Bewerbungen"],["week","Wochenplan"],["participants","Teilnehmer"],["contacts","Kontakte"],["export","Abrechnung / Export"]];
   document.getElementById("roleTabs").innerHTML=tabs.map(([id,label])=>`<button class="tab ${session.tab===id?"active":""}" onclick="setTab('${id}')">${label}</button>`).join("");
   document.getElementById("parentChildFilterWrap").classList.toggle("hidden", session.role!=="parent" && session.tab!=="week");
 }
@@ -585,13 +588,28 @@ function slotCard(s){
   const free=Math.max(0,s.capacity-s.participants);
   const full=free===0;
   const action=session.role==="parent" && seasonObj().registrationOpen
-    ? `<button class="btn btn-sm ${full?"btn-warning":"btn-primary"}" onclick="applyForSlot('${s.id}')">${full?"Warteliste":"Bewerben"}</button>`
+    ? `<button class="btn btn-sm ${full?"btn-warning":"btn-primary"}" onclick="event.stopPropagation();applyForSlot('${s.id}')">${full?"Warteliste":"Bewerben"}</button>`
     : "";
-  return `<div class="slot ${full?"full":""}">
+  const clickable=session.role==="parent";
+  return `<div class="slot ${full?"full":""}" ${clickable?`onclick="openSlotParticipants('${s.id}')" style="cursor:pointer" title="Teilnehmer anzeigen"`:""}>
     <div class="slot-title"><span>${esc(s.group)}</span><span class="level level-${s.level}">${levelLabel(s.level)}</span></div>
     <div class="meta"><strong>Datum: ${slotDate(s)}</strong><br>${s.duration} Min · Coach ${esc(s.coach)}<br>${s.participants}/${s.capacity} belegt · <strong>${free} frei</strong><br>Kosten: CHF ${s.cost}</div>
     <div style="margin-top:8px">${action}</div>
   </div>`;
+}
+function openSlotParticipants(slotId){
+  if(session.role!=="parent") return;
+  const s=db.slots.find(x=>x.id===slotId);
+  if(!s) return;
+  const accepted=db.applications.filter(a=>a.season===s.season && a.slotId===slotId && a.status==="accepted");
+  const names=accepted.map(a=>`<li><strong>${esc(a.child)}</strong></li>`).join("");
+  const missing=Math.max(0,(s.participants||0)-accepted.length);
+  const note=missing>0 ? `<p class="muted">${missing} weitere${missing===1?"r":""} Teilnehmer${missing===1?"":"/innen"} sind im Belegungsstand enthalten, aber in dieser lokalen Bewerbungsliste nicht mit Namen hinterlegt.</p>` : "";
+  openModal(`<h2>Teilnehmer</h2>
+    <p><strong>${slotDay(s)}, ${slotDate(s)}, ${s.time} · ${esc(s.group)}</strong><br><span class="level level-${s.level}">${levelLabel(s.level)}</span> · Coach ${esc(s.coach)}</p>
+    ${accepted.length?`<ul>${names}</ul>`:`<p class="muted">Noch keine bestätigten Teilnehmer mit Namen vorhanden.</p>`}
+    ${note}
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
 }
 function applyForSlot(slotId){
   const s=db.slots.find(x=>x.id===slotId);
