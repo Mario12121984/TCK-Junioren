@@ -742,19 +742,40 @@ function renderParticipants(){
   document.getElementById("content").innerHTML=`<div class="card"><h2>Bestätigte Teilnehmer</h2>${applicationTable(apps,false)}</div>`;
 }
 
+// Letzte Eingaben des Formulars je Trainingsperiode im Browser behalten.
+const trainingFields=["Title","Day","Start","End","Capacity","Level","Cost","Coach"];
+function trainingDraftKey(){return "tck_training_draft_v14_"+currentSeason();}
+function getTrainingDraft(){
+  try{return JSON.parse(localStorage.getItem(trainingDraftKey())||"null")||{};}
+  catch(e){return {};}
+}
+function rememberTrainingDraft(){
+  const draft={};
+  for(const field of trainingFields){
+    const el=document.getElementById("tr"+field);
+    if(!el)return;
+    draft[field]=el.value;
+  }
+  try{localStorage.setItem(trainingDraftKey(),JSON.stringify(draft));}catch(e){console.warn("Formulareingaben konnten nicht lokal gespeichert werden.",e);}
+}
+// Eingaben auch vor dem Speichern merken (z.B. bei Tab-Wechsel oder Neuladen).
+document.addEventListener("input",e=>{if(e.target?.id?.startsWith("tr")&&trainingFields.includes(e.target.id.slice(2)))rememberTrainingDraft();});
+document.addEventListener("change",e=>{if(e.target?.id?.startsWith("tr")&&trainingFields.includes(e.target.id.slice(2)))rememberTrainingDraft();});
 function trainingForm(s=null){
   const id=s?.id||"";
   const prefix=id?"editTr":"tr";
+  const draft=s?{}:getTrainingDraft();
+  const remembered=(key,fallback)=>s?fallback:(draft[key]??fallback);
   const option=(v,selected)=>`<option value="${v}" ${v===selected?"selected":""}>${v}</option>`;
   return `<div class="form-row">
-    <div><label>Trainingstitel</label><input id="${prefix}Title" maxlength="120" value="${esc(s?.group||"")}" placeholder="z. B. Junioren Kids"></div>
-    <div><label>Wochentag</label><select id="${prefix}Day">${trainingDays.map(d=>option(d,s?.day||"Montag")).join("")}</select></div>
-    <div><label>Beginn</label><input id="${prefix}Start" type="time" value="${esc(s?.time||"16:00")}"></div>
-    <div><label>Ende</label><input id="${prefix}End" type="time" value="${esc(s?slotEnd(s):"17:00")}"></div>
-    <div><label>Max. Teilnehmer</label><input id="${prefix}Capacity" type="number" min="1" step="1" value="${s?.capacity||8}"></div>
-    <div><label>Spielstärke</label><select id="${prefix}Level">${[["rot","Rot"],["orange","Orange"],["gruen","Grün"],["wettkampf","Wettkampf"]].map(([v,t])=>`<option value="${v}" ${v===(s?.level||"rot")?"selected":""}>${t}</option>`).join("")}</select></div>
-    <div><label>Preis pro Einheit (CHF)</label><input id="${prefix}Cost" type="number" min="0" step="0.01" value="${Number(s?.cost??0)}"></div>
-    <div><label>Trainer</label><input id="${prefix}Coach" maxlength="120" value="${esc(s?.coach||"")}" placeholder="z. B. Philippe"></div>
+    <div><label>Trainingstitel</label><input id="${prefix}Title" maxlength="120" value="${esc(remembered("Title",s?.group||""))}" placeholder="z. B. Junioren Kids"></div>
+    <div><label>Wochentag</label><select id="${prefix}Day">${trainingDays.map(d=>option(d,remembered("Day",s?.day||"Montag"))).join("")}</select></div>
+    <div><label>Beginn</label><input id="${prefix}Start" type="time" value="${esc(remembered("Start",s?.time||"16:00"))}"></div>
+    <div><label>Ende</label><input id="${prefix}End" type="time" value="${esc(remembered("End",s?slotEnd(s):"17:00"))}"></div>
+    <div><label>Max. Teilnehmer</label><input id="${prefix}Capacity" type="number" min="1" step="1" value="${remembered("Capacity",s?.capacity||8)}"></div>
+    <div><label>Spielstärke</label><select id="${prefix}Level">${[["rot","Rot"],["orange","Orange"],["gruen","Grün"],["wettkampf","Wettkampf"]].map(([v,t])=>`<option value="${v}" ${v===(remembered("Level",s?.level||"rot"))?"selected":""}>${t}</option>`).join("")}</select></div>
+    <div><label>Preis pro Einheit (CHF)</label><input id="${prefix}Cost" type="number" min="0" step="0.01" value="${remembered("Cost",Number(s?.cost??0))}"></div>
+    <div><label>Trainer</label><input id="${prefix}Coach" maxlength="120" value="${esc(remembered("Coach",s?.coach||""))}" placeholder="z. B. Philippe"></div>
   </div><p class="muted">Das Training findet während der gewählten Trainingsperiode jede Woche statt.</p>
   <button class="btn btn-primary" onclick="saveTraining('${id}','${prefix}')">${id?"Änderungen speichern":"Training hinzufügen"}</button>`;
 }
@@ -790,6 +811,7 @@ async function saveTraining(id="",prefix="tr"){
   try{
     if(id){const {error}=await authClient.from("training_slots").update(row).eq("id",id);if(error)throw error;}
     else await writeRow("training_slots",{...row,season_id:currentSeason()},"insert");
+    if(!id)rememberTrainingDraft();
     closeModal();await refreshUI();
   }catch(e){showDbError(e);}
 }
