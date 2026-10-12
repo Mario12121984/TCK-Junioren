@@ -744,16 +744,18 @@ function renderParticipants(){
 
 function trainingForm(s=null){
   const id=s?.id||"";
+  const prefix=id?"editTr":"tr";
   const option=(v,selected)=>`<option value="${v}" ${v===selected?"selected":""}>${v}</option>`;
   return `<div class="form-row">
-    <div><label>Trainingstitel</label><input id="trTitle" maxlength="120" value="${esc(s?.group||"")}" placeholder="z. B. Junioren Kids"></div>
-    <div><label>Wochentag</label><select id="trDay">${trainingDays.map(d=>option(d,s?.day||"Montag")).join("")}</select></div>
-    <div><label>Beginn</label><input id="trStart" type="time" value="${esc(s?.time||"16:00")}"></div>
-    <div><label>Ende</label><input id="trEnd" type="time" value="${esc(s?slotEnd(s):"17:00")}"></div>
-    <div><label>Max. Teilnehmer</label><input id="trCapacity" type="number" min="1" step="1" value="${s?.capacity||8}"></div>
-    <div><label>Spielstärke</label><select id="trLevel">${[["rot","Rot"],["orange","Orange"],["gruen","Grün"],["wettkampf","Wettkampf"]].map(([v,t])=>`<option value="${v}" ${v===(s?.level||"rot")?"selected":""}>${t}</option>`).join("")}</select></div>
+    <div><label>Trainingstitel</label><input id="${prefix}Title" maxlength="120" value="${esc(s?.group||"")}" placeholder="z. B. Junioren Kids"></div>
+    <div><label>Wochentag</label><select id="${prefix}Day">${trainingDays.map(d=>option(d,s?.day||"Montag")).join("")}</select></div>
+    <div><label>Beginn</label><input id="${prefix}Start" type="time" value="${esc(s?.time||"16:00")}"></div>
+    <div><label>Ende</label><input id="${prefix}End" type="time" value="${esc(s?slotEnd(s):"17:00")}"></div>
+    <div><label>Max. Teilnehmer</label><input id="${prefix}Capacity" type="number" min="1" step="1" value="${s?.capacity||8}"></div>
+    <div><label>Spielstärke</label><select id="${prefix}Level">${[["rot","Rot"],["orange","Orange"],["gruen","Grün"],["wettkampf","Wettkampf"]].map(([v,t])=>`<option value="${v}" ${v===(s?.level||"rot")?"selected":""}>${t}</option>`).join("")}</select></div>
+    <div><label>Preis pro Einheit (CHF)</label><input id="${prefix}Cost" type="number" min="0" step="0.01" value="${Number(s?.cost??0)}"></div>
   </div><p class="muted">Das Training findet während der gewählten Trainingsperiode jede Woche statt.</p>
-  <button class="btn btn-primary" onclick="saveTraining('${id}')">${id?"Änderungen speichern":"Training hinzufügen"}</button>`;
+  <button class="btn btn-primary" onclick="saveTraining('${id}','${prefix}')">${id?"Änderungen speichern":"Training hinzufügen"}</button>`;
 }
 function renderSetup(){
   const slots=db.slots.filter(s=>s.season===currentSeason()).sort((a,b)=>trainingDays.indexOf(slotDay(a))-trainingDays.indexOf(slotDay(b))||a.time.localeCompare(b.time));
@@ -767,24 +769,26 @@ function renderSetup(){
       <h3>Neue Trainingsperiode</h3><button class="btn btn-primary" onclick="createSeason()">Neue Saison anlegen</button>
     </div>
     <div class="card"><h2>Neues Training anlegen</h2>${trainingForm()}</div>
-  </div><br><div class="card"><h2>Bestehende Trainings</h2><div style="overflow:auto"><table><thead><tr><th>Tag / Zeit</th><th>Titel</th><th>Spielstärke</th><th>Plätze</th><th>Rhythmus</th><th>Aktionen</th></tr></thead><tbody>
-    ${slots.map(s=>`<tr><td>${esc(slotDay(s))}<br><strong>${esc(s.time)}–${esc(slotEnd(s))}</strong></td><td>${esc(s.group)}</td><td>${esc(levelLabel(s.level))}</td><td>${s.participants}/${s.capacity}</td><td>${s.recurring?"Wöchentlich":esc(slotDate(s))}</td><td><button class="btn btn-sm btn-secondary" onclick="editTraining('${s.id}')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="deleteSlot('${s.id}')">Löschen</button></td></tr>`).join("")||`<tr><td colspan="6">Noch keine Trainings vorhanden.</td></tr>`}
+  </div><br><div class="card"><h2>Bestehende Trainings</h2><div style="overflow:auto"><table><thead><tr><th>Tag / Zeit</th><th>Titel</th><th>Spielstärke</th><th>Plätze</th><th>Preis / Einheit</th><th>Rhythmus</th><th>Aktionen</th></tr></thead><tbody>
+    ${slots.map(s=>`<tr><td>${esc(slotDay(s))}<br><strong>${esc(s.time)}–${esc(slotEnd(s))}</strong></td><td>${esc(s.group)}</td><td>${esc(levelLabel(s.level))}</td><td>${s.participants}/${s.capacity}</td><td>CHF ${Number(s.cost||0).toFixed(2)}</td><td>${s.recurring?"Wöchentlich":esc(slotDate(s))}</td><td><button class="btn btn-sm btn-secondary" onclick="editTraining('${s.id}')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="deleteSlot('${s.id}')">Löschen</button></td></tr>`).join("")||`<tr><td colspan="7">Noch keine Trainings vorhanden.</td></tr>`}
   </tbody></table></div></div>`;
   document.getElementById("seType").value=seasonObj().type;
 }
 function editTraining(id){const s=db.slots.find(x=>x.id===id);if(!s)return;openModal(`<h2>Training bearbeiten</h2>${trainingForm(s)}<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button></div>`);}
-async function saveTraining(id=""){
-  const val=k=>document.getElementById(k).value.trim();
-  const title=val("trTitle"),day=val("trDay"),start=val("trStart"),end=val("trEnd"),capacity=Number(val("trCapacity"));
+async function saveTraining(id="",prefix="tr"){
+  const val=k=>document.getElementById(prefix+k).value.trim();
+  const title=val("Title"),day=val("Day"),start=val("Start"),end=val("End"),capacity=Number(val("Capacity"));
   if(!title||!start||!end||!trainingDays.includes(day)||!Number.isSafeInteger(capacity)||capacity<1){alert("Bitte alle Angaben korrekt ausfüllen.");return;}
   if(end<=start){alert("Die Endzeit muss nach der Startzeit liegen.");return;}
+  const cost=Number(val("Cost"));
+  if(!Number.isFinite(cost)||cost<0){alert("Bitte einen gültigen Preis in CHF eingeben.");return;}
   const duration=(Number(end.slice(0,2))*60+Number(end.slice(3)))-(Number(start.slice(0,2))*60+Number(start.slice(3)));
   const existing=id?db.slots.find(x=>x.id===id):null;
   if(existing&&capacity<existing.participants){alert("Die Teilnehmerzahl darf nicht kleiner als die bestätigten Plätze sein.");return;}
-  const row={title,day,training_time:start,end_time:end,duration,capacity,level:val("trLevel"),is_recurring:true,training_date:null,group_name:title};
+  const row={title,day,training_time:start,end_time:end,duration,capacity,cost,level:val("Level"),is_recurring:true,training_date:null,group_name:title};
   try{
     if(id){const {error}=await authClient.from("training_slots").update(row).eq("id",id);if(error)throw error;}
-    else await writeRow("training_slots",{...row,season_id:currentSeason(),cost:0,coach:""},"insert");
+    else await writeRow("training_slots",{...row,season_id:currentSeason(),coach:""},"insert");
     closeModal();await refreshUI();
   }catch(e){showDbError(e);}
 }
