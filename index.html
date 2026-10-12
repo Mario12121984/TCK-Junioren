@@ -280,12 +280,36 @@ const seed = {
   ]
 };
 
-let db = JSON.parse(localStorage.getItem("tckJuniorApp") || "null") || seed;
+let db = {seasons:[],slots:[],applications:[],contacts:[]};
 let session = {role:null,email:null,tab:null};
 
-function save(){ localStorage.setItem("tckJuniorApp", JSON.stringify(db)); }
+// V10: Alle Trainings- und Bewerbungsdaten kommen ausschliesslich aus Supabase.
+async function reloadData(){
+  if(!authClient) throw new Error("Supabase ist nicht konfiguriert.");
+  const read=async(table)=>{const {data,error}=await authClient.from(table).select("*");if(error)throw error;return data||[]};
+  const seasons=await read("training_seasons");
+  const slots=await read("training_slots");
+  const apps=await read("training_applications");
+  db.seasons=seasons.map(x=>({id:x.id,name:x.name,type:x.type,active:x.active,registrationOpen:x.registration_open}));
+  db.slots=slots.map(x=>({id:x.id,season:x.season_id,day:x.day,date:x.training_date,time:x.training_time.slice(0,5),duration:x.duration,group:x.group_name,level:x.level,capacity:x.capacity,cost:x.cost,coach:x.coach,participants:0}));
+  db.applications=apps.map(x=>({id:x.id,season:x.season_id,slotId:x.slot_id,parentName:x.parent_name,email:x.email,mobile:x.mobile,child:x.child,birthYear:x.birth_year,level:x.level,status:x.status,comment:x.comment,coachComment:x.coach_comment,created:x.created_at.slice(0,10)}));
+  // Nur bestätigte Einträge zählen; Eltern erhalten die Belegungszahlen über eine separate, datensparsame RPC.
+  if(session.role==="parent"){
+    const {data,error}=await authClient.rpc("training_slot_counts");if(error)throw error;
+    for(const item of data||[]){const slot=db.slots.find(s=>s.id===item.slot_id);if(slot)slot.participants=Number(item.confirmed_count);}
+  }else{
+    for(const slot of db.slots)slot.participants=db.applications.filter(a=>a.slotId===slot.id&&a.status==="accepted").length;
+  }
+  db.contacts=[];
+}
+async function refreshUI(){await reloadData();fillSeasons();renderTabs();renderAll();}
+async function writeRow(table,row,method="upsert"){
+  const {error}=await authClient.from(table)[method](row);if(error)throw error;
+}
+function showDbError(error){console.error(error);alert("Supabase-Fehler: "+(error?.message||error)+". Bitte SQL-Skript und Berechtigungen prüfen.");}
+
 function esc(s){ return String(s ?? "").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]));}
-function currentSeason(){ return document.getElementById("seasonSelect").value || db.seasons[0].id; }
+function currentSeason(){ return document.getElementById("seasonSelect").value || db.seasons[0]?.id || ""; }
 function seasonObj(){ return db.seasons.find(s=>s.id===currentSeason()); }
 function levelLabel(l){ return ({rot:"Rot",orange:"Orange",gruen:"Grün",wettkampf:"Wettkampf"})[l]||l; }
 function formatDate(date){
@@ -500,9 +524,8 @@ function enterSession(role,email){
   document.getElementById("staffEntry").classList.add("hidden");
   const labels={parent:"Eltern",coach:"Headcoach / Juniorenteam",admin:"Admin"};
   document.getElementById("sessionInfo").textContent=`${labels[session.role]} · ${session.email}`;
-  fillSeasons();
-  renderTabs();
-  renderAll();
+  document.getElementById("content").innerHTML="<div class=notice>Trainingsdaten werden aus Supabase geladen …</div>";
+  refreshUI().catch(showDbError);
 }
 
 async function logout(){
@@ -568,6 +591,7 @@ function renderAll(){
 }
 
 function renderWeek(){
+  if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Noch keine Trainingsperiode vorhanden. Admin: Bitte zuerst eine Periode anlegen.</div>";return;}
   const sid=currentSeason(), filter=document.getElementById("levelFilter")?.value||"all";
   const slots=db.slots.filter(s=>s.season===sid && (filter==="all"||s.level===filter));
   const days=["Montag","Mittwoch","Freitag"];
@@ -597,27 +621,26 @@ function slotCard(s){
     <div style="margin-top:8px">${action}</div>
   </div>`;
 }
-function openSlotParticipants(slotId){
-  // Teilnehmernamen nur nach Anmeldung anzeigen; keine Kontaktdaten ausgeben.
+async function openSlotParticipants(slotId){
   if(session.role!=="parent" || !session.email) return;
-  const s=db.slots.find(x=>x.id===slotId);
-  if(!s) return;
-  const accepted=db.applications.filter(a=>a.season===s.season && a.slotId===slotId && a.status==="accepted" && String(a.child||"").trim());
-  const uniqueNames=[...new Set(accepted.map(a=>a.child.trim()))].sort((a,b)=>a.localeCompare(b,"de-CH"));
-  const names=uniqueNames.map(name=>`<li style="padding:7px 0;border-bottom:1px solid var(--line)"><strong>${esc(name)}</strong></li>`).join("");
-  const missing=Math.max(0,(Number(s.participants)||0)-uniqueNames.length);
-  openModal(`<h2>Teilnehmer dieser Trainingseinheit</h2>
-    <p><strong>${esc(slotDay(s))}, ${esc(slotDate(s))}, ${esc(s.time)} Uhr · ${esc(s.group)}</strong><br>
-    <span class="level level-${esc(s.level)}">${esc(levelLabel(s.level))}</span> · Coach ${esc(s.coach)}</p>
-    <div class="notice"><strong>${Number(s.participants)||0} von ${Number(s.capacity)||0} Plätzen belegt</strong></div>
-    ${uniqueNames.length?`<ol style="padding-left:24px">${names}</ol>`:`<p class="muted">Noch keine bestätigten Teilnehmer mit Namen hinterlegt.</p>`}
-    ${missing?`<p class="muted">${missing} weitere belegte ${missing===1?"Platz ist":"Plätze sind"} vorhanden; die Namen sind in den gespeicherten Bewerbungen nicht hinterlegt.</p>`:""}
-    <p class="muted">Es werden ausschliesslich Namen bestätigter Teilnehmer angezeigt, keine Kontaktdaten.</p>
-    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+  const s=db.slots.find(x=>x.id===slotId);if(!s)return;
+  openModal("<h2>Teilnehmer dieser Trainingseinheit</h2><p>Lade bestätigte Teilnehmer …</p>");
+  try{
+    const {data,error}=await authClient.rpc("training_participant_names",{p_slot_id:slotId});
+    if(error)throw error;
+    const names=(data||[]).map(x=>String(x.child_name||"").trim()).filter(Boolean);
+    openModal(`<h2>Teilnehmer dieser Trainingseinheit</h2>
+      <p><strong>${esc(slotDay(s))}, ${esc(slotDate(s))}, ${esc(s.time)} Uhr · ${esc(s.group)}</strong><br>${esc(levelLabel(s.level))} · Coach ${esc(s.coach)}</p>
+      <div class="notice"><strong>${s.participants} von ${s.capacity} Plätzen belegt</strong></div>
+      ${names.length?`<ol>${names.map(n=>`<li>${esc(n)}</li>`).join("")}</ol>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}
+      <p class="muted">Es werden nur Namen angezeigt, keine Kontaktdaten.</p>
+      <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+  }catch(e){showDbError(e);closeModal();}
 }
 
 function applyForSlot(slotId){
   const s=db.slots.find(x=>x.id===slotId);
+  if(!s)return;
   openModal(`<h2>Bewerbung für Trainingsplatz</h2>
     <p><strong>${slotDay(s)}, ${slotDate(s)}, ${s.time} · ${s.group}</strong><br><span class="level level-${s.level}">${levelLabel(s.level)}</span> · CHF ${s.cost}</p>
     <div class="form-row">
@@ -634,27 +657,18 @@ function applyForSlot(slotId){
     <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="submitApplication('${slotId}')">Bewerbung senden</button></div>`);
   document.getElementById("apLevel").value=s.level;
 }
-function submitApplication(slotId){
-  const application={
-    id:"a"+Date.now(),season:currentSeason(),slotId,
-    parentName:document.getElementById("apParent").value,
-    email:document.getElementById("apEmail").value,
-    mobile:document.getElementById("apMobile").value,
-    child:document.getElementById("apChild").value,
-    birthYear:Number(document.getElementById("apBirth").value)||null,
-    level:document.getElementById("apLevel").value,status:"pending",
-    comment:document.getElementById("apComment").value,coachComment:"",
-    created:new Date().toISOString().slice(0,10)
-  };
-  if(!application.parentName||!application.email||!application.child){alert("Bitte Name Eltern, E-Mail und Name des Kindes ausfüllen.");return;}
-  db.applications.push(application);
-  if(!db.contacts.some(c=>c.email===application.email&&c.child===application.child)){
-    db.contacts.push({id:"c"+Date.now(),child:application.child,parentName:application.parentName,email:application.email,mobile:application.mobile,level:application.level,source:"Neue Anmeldung"});
-  }
-  save(); closeModal(); alert("Bewerbung wurde erfasst."); renderWeek();
+async function submitApplication(slotId){
+  const row={season_id:currentSeason(),slot_id:slotId,parent_name:document.getElementById("apParent").value.trim(),
+    mobile:document.getElementById("apMobile").value.trim(),child:document.getElementById("apChild").value.trim(),
+    birth_year:Number(document.getElementById("apBirth").value)||null,level:document.getElementById("apLevel").value,
+    comment:document.getElementById("apComment").value.trim()};
+  if(!row.parent_name||!row.child){alert("Bitte Name Eltern und Kind ausfüllen.");return;}
+  try{await writeRow("training_applications",row,"insert");closeModal();await refreshUI();alert("Bewerbung in Supabase gespeichert.");}
+  catch(e){showDbError(e);}
 }
+
 function renderMyApps(){
-  const apps=db.applications.filter(a=>a.email===session.email);
+  const apps=db.applications;
   document.getElementById("content").innerHTML=`<div class="card"><h2>Meine Bewerbungen</h2>${apps.length?applicationTable(apps,false):`<p class="muted">Noch keine Bewerbung mit ${esc(session.email)} erfasst.</p>`}</div>`;
 }
 function renderProfile(){
@@ -669,6 +683,7 @@ function renderProfile(){
 }
 
 function renderApplications(){
+  if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Bitte zuerst als Admin eine Trainingsperiode anlegen.</div>";return;}
   const apps=db.applications.filter(a=>a.season===currentSeason());
   const pending=apps.filter(a=>a.status==="pending").length;
   const accepted=apps.filter(a=>a.status==="accepted").length;
@@ -704,26 +719,22 @@ function reviewApplication(id){
       <div><label>Trainingsslot</label><select id="rvSlot">${alternatives.map(s=>`<option value="${s.id}">${slotDay(s)}, ${slotDate(s)} · ${s.time} · ${s.group} · ${levelLabel(s.level)}</option>`).join("")}</select></div>
     </div>
     <div><label>Kommentar an Eltern</label><textarea id="rvComment">${esc(a.coachComment)}</textarea></div>
-    <div class="notice"><strong>E-Mail-Vorschau:</strong><br>Nach Speichern würde automatisch eine E-Mail an ${esc(a.email)} vorbereitet/versendet. Im echten System via Mail-Provider oder Clubdesk.</div>
-    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveReview('${id}')">Speichern & E-Mail auslösen</button></div>`);
+    <div class="notice">Die Änderung wird in Supabase gespeichert. Ein automatischer E-Mail-Versand ist noch nicht eingerichtet.</div>
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveReview('${id}')">In Supabase speichern</button></div>`);
   document.getElementById("rvStatus").value=a.status;
   document.getElementById("rvSlot").value=current?.id||alternatives[0]?.id;
 }
-function saveReview(id){
-  const a=db.applications.find(x=>x.id===id);
-  const oldSlot=db.slots.find(x=>x.id===a.slotId);
-  const newSlotId=document.getElementById("rvSlot").value;
-  const newStatus=document.getElementById("rvStatus").value;
-  if(a.status!=="accepted" && newStatus==="accepted"){
-    const s=db.slots.find(x=>x.id===newSlotId); if(s) s.participants=Math.min(s.capacity,s.participants+1);
-  }
-  if(a.status==="accepted" && (newStatus!=="accepted" || newSlotId!==a.slotId)){
-    if(oldSlot) oldSlot.participants=Math.max(0,oldSlot.participants-1);
-    if(newStatus==="accepted"){ const s=db.slots.find(x=>x.id===newSlotId); if(s) s.participants=Math.min(s.capacity,s.participants+1); }
-  }
-  a.slotId=newSlotId;a.status=newStatus;a.coachComment=document.getElementById("rvComment").value;
-  save(); closeModal(); renderApplications(); alert("Gespeichert. Demo: E-Mail wäre jetzt ausgelöst worden.");
+async function saveReview(id){
+  const slotId=document.getElementById("rvSlot").value;
+  const status=document.getElementById("rvStatus").value;
+  const comment=document.getElementById("rvComment").value;
+  try{
+    const {error}=await authClient.from("training_applications").update({slot_id:slotId,status,coach_comment:comment}).eq("id",id);if(error)throw error;
+    // update() mit Objekt und id-Filter ist notwendig; siehe direkte Abfrage unten.
+  }catch(e){showDbError(e);return;}
+  closeModal();await refreshUI();alert("In Supabase gespeichert. Es wurde keine E-Mail versendet.");
 }
+
 function renderParticipants(){
   const apps=db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted");
   document.getElementById("content").innerHTML=`<div class="card"><h2>Bestätigte Teilnehmer</h2>${applicationTable(apps,false)}</div>`;
@@ -731,6 +742,7 @@ function renderParticipants(){
 
 function renderSetup(){
   const slots=db.slots.filter(s=>s.season===currentSeason());
+  if(!db.seasons.length){document.getElementById("content").innerHTML=`<div class="card"><h2>Keine Trainingsperiode vorhanden</h2><button class="btn btn-primary" onclick="createSeason()">Trainingsperiode anlegen</button></div>`;return;}
   document.getElementById("content").innerHTML=`<div class="grid grid-2">
     <div class="card"><h2>Trainingsperiode</h2>
       <div class="form-row"><div><label>Name</label><input id="seName" value="${esc(seasonObj().name)}"></div><div><label>Typ</label><select id="seType"><option>Sommer</option><option>Winter</option></select></div></div>
@@ -758,39 +770,44 @@ function renderSetup(){
   </tbody></table></div></div>`;
   document.getElementById("seType").value=seasonObj().type;
 }
-function saveSeason(){
-  const s=seasonObj();s.name=document.getElementById("seName").value;s.type=document.getElementById("seType").value;s.registrationOpen=document.getElementById("seOpen").checked;save();fillSeasons();renderSetup();
+async function saveSeason(){
+  const s=seasonObj();if(!s)return;
+  try{await writeRow("training_seasons",{id:s.id,name:document.getElementById("seName").value,type:document.getElementById("seType").value,registration_open:document.getElementById("seOpen").checked});await refreshUI();}
+  catch(e){showDbError(e);}
 }
-function createSeason(){
-  const id="season-"+Date.now();
-  db.seasons.push({id,name:"Neue Trainingsperiode",type:"Sommer",active:false,registrationOpen:false});
-  save();fillSeasons();document.getElementById("seasonSelect").value=id;renderSetup();
+async function createSeason(){
+  try{const {data,error}=await authClient.from("training_seasons").insert({name:"Neue Trainingsperiode",type:"Sommer",registration_open:false}).select("id").single();if(error)throw error;await refreshUI();document.getElementById("seasonSelect").value=data.id;renderSetup();}
+  catch(e){showDbError(e);}
 }
+
 function updateAutoWeekday(){
   const date=document.getElementById("nsDate")?.value;
   const field=document.getElementById("nsDayAuto");
   if(field) field.value=weekdayFromDate(date);
 }
-function addSlot(){
-  const date=document.getElementById("nsDate").value;
-  if(!date){ alert("Bitte zuerst ein Datum auswählen."); return; }
-  db.slots.push({
-    id:"slot-"+Date.now(),season:currentSeason(),day:weekdayFromDate(document.getElementById("nsDate").value),date:document.getElementById("nsDate").value,time:document.getElementById("nsTime").value,
-    duration:Number(document.getElementById("nsDuration").value),group:document.getElementById("nsGroup").value,level:document.getElementById("nsLevel").value,
-    capacity:Number(document.getElementById("nsCapacity").value),cost:Number(document.getElementById("nsCost").value),coach:document.getElementById("nsCoach").value,participants:0
-  }); save();renderSetup();
+async function addSlot(){
+  const val=id=>document.getElementById(id).value;
+  if(!val("nsDate")){alert("Bitte zuerst ein Datum auswählen.");return;}
+  try{
+    await writeRow("training_slots",{season_id:currentSeason(),training_date:val("nsDate"),day:weekdayFromDate(val("nsDate")),training_time:val("nsTime"),
+      duration:Number(val("nsDuration")),group_name:val("nsGroup"),level:val("nsLevel"),capacity:Number(val("nsCapacity")),cost:Number(val("nsCost")),coach:val("nsCoach")},"insert");
+    await refreshUI();
+  }catch(e){showDbError(e);}
 }
-function deleteSlot(id){
-  if(!confirm("Slot wirklich löschen? Bewerbungen darauf bleiben als Hinweis bestehen.")) return;
-  db.slots=db.slots.filter(s=>s.id!==id);save();renderSetup();
+async function deleteSlot(id){
+  if(!confirm("Slot wirklich löschen? Nur ohne bestehende Bewerbungen möglich."))return;
+  try{const {error}=await authClient.from("training_slots").delete().eq("id",id);if(error)throw error;await refreshUI();}catch(e){showDbError(e);}
 }
+
 function renderContacts(){
+  db.contacts=db.applications.map(a=>({child:a.child,parentName:a.parentName,email:a.email,mobile:a.mobile,level:a.level,source:"Supabase Bewerbung"}));
   document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Clubdesk-Import / neue Interessenten</span></div><button class="btn btn-secondary" onclick="alert('Demo: CSV/API Import aus Clubdesk')">Clubdesk-Import</button></div>
   <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Stufe</th><th>Quelle</th></tr></thead><tbody>
   ${db.contacts.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td>${levelLabel(c.level)}</td><td>${esc(c.source)}</td></tr>`).join("")}
   </tbody></table></div></div>`;
 }
 function renderExport(){
+  if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Keine Trainingsperiode vorhanden.</div>";return;}
   const accepted=db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted");
   const revenue=accepted.reduce((sum,a)=>{const s=db.slots.find(x=>x.id===a.slotId);return sum+(s?.cost||0)},0);
   document.getElementById("content").innerHTML=`<div class="grid grid-2"><div class="card"><h2>Abrechnung / Excel-Export</h2>
