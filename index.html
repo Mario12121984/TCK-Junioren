@@ -60,7 +60,7 @@
     .tab{border:1px solid var(--line);background:white;padding:9px 13px;border-radius:10px}
     .tab.active{background:var(--primary);color:white;border-color:var(--primary)}
     .week{overflow-x:auto}
-    .week-grid{display:grid;grid-template-columns:110px repeat(3,minmax(260px,1fr));min-width:960px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+    .week-grid{display:grid;grid-template-columns:110px repeat(7,minmax(210px,1fr));min-width:1580px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
     .week-grid>div{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px;background:white}
     .week-grid .head{background:#f8fafc;font-weight:800;text-align:center}
     .time{background:#f8fafc!important;font-weight:700;color:#475467}
@@ -291,7 +291,7 @@ async function reloadData(){
   const slots=await read("training_slots");
   const apps=await read("training_applications");
   db.seasons=seasons.map(x=>({id:x.id,name:x.name,type:x.type,active:x.active,registrationOpen:x.registration_open}));
-  db.slots=slots.map(x=>({id:x.id,season:x.season_id,day:x.day,date:x.training_date,time:x.training_time.slice(0,5),duration:x.duration,group:x.group_name,level:x.level,capacity:x.capacity,cost:x.cost,coach:x.coach,participants:0}));
+  db.slots=slots.map(x=>({id:x.id,season:x.season_id,day:x.day,date:x.training_date,time:x.training_time.slice(0,5),duration:x.duration,group:x.title||x.group_name||"Training",endTime:x.end_time?.slice(0,5)||"",recurring:!!x.is_recurring,level:x.level,capacity:x.capacity,cost:x.cost,coach:x.coach,participants:0}));
   db.applications=apps.map(x=>({id:x.id,season:x.season_id,slotId:x.slot_id,parentName:x.parent_name,email:x.email,mobile:x.mobile,child:x.child,birthYear:x.birth_year,level:x.level,status:x.status,comment:x.comment,coachComment:x.coach_comment,created:x.created_at.slice(0,10)}));
   // Nur bestätigte Einträge zählen; Eltern erhalten die Belegungszahlen über eine separate, datensparsame RPC.
   if(session.role==="parent"){
@@ -317,14 +317,16 @@ function formatDate(date){
   const [y,m,d]=date.split("-");
   return `${d}.${m}.${y}`;
 }
-function slotDate(s){ return formatDate(s.date); }
+function slotDate(s){ return s.recurring ? "Wöchentlich" : formatDate(s.date); }
 function weekdayFromDate(date){
   if(!date) return "";
   const [y,m,d]=date.split("-").map(Number);
   const names=["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
   return names[new Date(y,m-1,d).getDay()];
 }
-function slotDay(s){ return weekdayFromDate(s.date) || s.day || ""; }
+function slotDay(s){ return s.recurring ? s.day : (weekdayFromDate(s.date) || s.day || ""); }
+function slotEnd(s){if(s.endTime)return s.endTime;const [h,m]=(s.time||"00:00").split(":").map(Number);const total=h*60+m+(Number(s.duration)||60);return `${String(Math.floor(total/60)%24).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;}
+const trainingDays=["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"];
 
 
 
@@ -594,9 +596,9 @@ function renderWeek(){
   if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Noch keine Trainingsperiode vorhanden. Admin: Bitte zuerst eine Periode anlegen.</div>";return;}
   const sid=currentSeason(), filter=document.getElementById("levelFilter")?.value||"all";
   const slots=db.slots.filter(s=>s.season===sid && (filter==="all"||s.level===filter));
-  const days=["Montag","Mittwoch","Freitag"];
+  const days=trainingDays;
   const times=[...new Set(slots.map(s=>s.time))].sort();
-  let html=`<div class="notice"><strong>${esc(seasonObj().name)}</strong> – ${seasonObj().registrationOpen?"Bewerbungen sind aktuell möglich.":"Anmeldung geschlossen."} Ein Slot ist erst nach Bestätigung durch den Headcoach definitiv.</div><br>`;
+  let html=`<div class="notice"><strong>${esc(seasonObj().name)}</strong> – ${seasonObj().registrationOpen?"Bewerbungen sind aktuell möglich.":"Anmeldung geschlossen."} Ein Trainingsplatz ist erst nach Bestätigung durch den Headcoach definitiv.</div><br>`;
   html+=`<div class="week"><div class="week-grid"><div class="head">Zeit</div>${days.map(d=>`<div class="head">${d}</div>`).join("")}`;
   times.forEach(t=>{
     html+=`<div class="time">${t}</div>`;
@@ -617,7 +619,7 @@ function slotCard(s){
   const clickable=session.role==="parent";
   return `<div class="slot ${full?"full":""}" ${clickable?`onclick="openSlotParticipants('${s.id}')" style="cursor:pointer" title="Teilnehmer anzeigen"`:""}>
     <div class="slot-title"><span>${esc(s.group)}</span><span class="level level-${s.level}">${levelLabel(s.level)}</span></div>
-    <div class="meta"><strong>Datum: ${slotDate(s)}</strong><br>${s.duration} Min · Coach ${esc(s.coach)}<br>${s.participants}/${s.capacity} belegt · <strong>${free} frei</strong><br>Kosten: CHF ${s.cost}</div>
+    <div class="meta"><strong>${esc(slotDay(s))}${s.recurring?" · wöchentlich":" · "+slotDate(s)}</strong><br>${esc(s.time)}–${esc(slotEnd(s))} Uhr<br>${s.participants}/${s.capacity} belegt · <strong>${free} frei</strong></div>
     <div style="margin-top:8px">${action}</div>
   </div>`;
 }
@@ -630,7 +632,7 @@ async function openSlotParticipants(slotId){
     if(error)throw error;
     const names=(data||[]).map(x=>String(x.child_name||"").trim()).filter(Boolean);
     openModal(`<h2>Teilnehmer dieser Trainingseinheit</h2>
-      <p><strong>${esc(slotDay(s))}, ${esc(slotDate(s))}, ${esc(s.time)} Uhr · ${esc(s.group)}</strong><br>${esc(levelLabel(s.level))} · Coach ${esc(s.coach)}</p>
+      <p><strong>${esc(slotDay(s))}, ${esc(slotDate(s))}, ${esc(s.time)} Uhr · ${esc(s.group)}</strong><br>${esc(levelLabel(s.level))}</p>
       <div class="notice"><strong>${s.participants} von ${s.capacity} Plätzen belegt</strong></div>
       ${names.length?`<ol>${names.map(n=>`<li>${esc(n)}</li>`).join("")}</ol>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}
       <p class="muted">Es werden nur Namen angezeigt, keine Kontaktdaten.</p>
@@ -642,7 +644,7 @@ function applyForSlot(slotId){
   const s=db.slots.find(x=>x.id===slotId);
   if(!s)return;
   openModal(`<h2>Bewerbung für Trainingsplatz</h2>
-    <p><strong>${slotDay(s)}, ${slotDate(s)}, ${s.time} · ${s.group}</strong><br><span class="level level-${s.level}">${levelLabel(s.level)}</span> · CHF ${s.cost}</p>
+    <p><strong>${slotDay(s)}, ${s.time}–${slotEnd(s)} · ${esc(s.group)}</strong><br><span class="level level-${s.level}">${levelLabel(s.level)}</span></p>
     <div class="form-row">
       <div><label>Name Eltern / Kontaktperson</label><input id="apParent" value=""></div>
       <div><label>E-Mail</label><input id="apEmail" type="email" value="${esc(session.email)}"></div>
@@ -699,7 +701,7 @@ function applicationTable(apps,withActions){
     const s=db.slots.find(x=>x.id===a.slotId);
     return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">Jg. ${a.birthYear||"-"} · ${levelLabel(a.level)}</span></td>
       <td>${esc(a.parentName)}<br><span class="muted">${esc(a.email)}<br>${esc(a.mobile)}</span></td>
-      <td>${s?`${slotDay(s)}, ${slotDate(s)} · ${s.time}<br><span class="muted">${esc(s.group)} · ${levelLabel(s.level)}</span>`:"Slot gelöscht"}</td>
+      <td>${s?`${slotDay(s)} · ${s.time}–${slotEnd(s)}<br><span class="muted">${esc(s.group)} · ${levelLabel(s.level)}</span>`:"Slot gelöscht"}</td>
       <td><span class="status s-${a.status}">${({pending:"Offen",accepted:"Akzeptiert",rejected:"Abgelehnt",moved:"Verschoben"})[a.status]||a.status}</span></td>
       <td><span class="muted">${esc(a.comment||"-")}<br>${a.coachComment?`Coach: ${esc(a.coachComment)}`:""}</span></td>
       ${withActions?`<td><button class="btn btn-sm btn-primary" onclick="reviewApplication('${a.id}')">Bearbeiten</button></td>`:""}
@@ -716,7 +718,7 @@ function reviewApplication(id){
       <div><label>Status</label><select id="rvStatus">
         <option value="pending">Offen</option><option value="accepted">Akzeptiert</option><option value="moved">Verschoben</option><option value="rejected">Abgelehnt</option>
       </select></div>
-      <div><label>Trainingsslot</label><select id="rvSlot">${alternatives.map(s=>`<option value="${s.id}">${slotDay(s)}, ${slotDate(s)} · ${s.time} · ${s.group} · ${levelLabel(s.level)}</option>`).join("")}</select></div>
+      <div><label>Trainingsslot</label><select id="rvSlot">${alternatives.map(s=>`<option value="${s.id}">${slotDay(s)} · ${s.time}–${slotEnd(s)} · ${s.group} · ${levelLabel(s.level)}</option>`).join("")}</select></div>
     </div>
     <div><label>Kommentar an Eltern</label><textarea id="rvComment">${esc(a.coachComment)}</textarea></div>
     <div class="notice">Die Änderung wird in Supabase gespeichert. Ein automatischer E-Mail-Versand ist noch nicht eingerichtet.</div>
@@ -740,8 +742,21 @@ function renderParticipants(){
   document.getElementById("content").innerHTML=`<div class="card"><h2>Bestätigte Teilnehmer</h2>${applicationTable(apps,false)}</div>`;
 }
 
+function trainingForm(s=null){
+  const id=s?.id||"";
+  const option=(v,selected)=>`<option value="${v}" ${v===selected?"selected":""}>${v}</option>`;
+  return `<div class="form-row">
+    <div><label>Trainingstitel</label><input id="trTitle" maxlength="120" value="${esc(s?.group||"")}" placeholder="z. B. Junioren Kids"></div>
+    <div><label>Wochentag</label><select id="trDay">${trainingDays.map(d=>option(d,s?.day||"Montag")).join("")}</select></div>
+    <div><label>Beginn</label><input id="trStart" type="time" value="${esc(s?.time||"16:00")}"></div>
+    <div><label>Ende</label><input id="trEnd" type="time" value="${esc(s?slotEnd(s):"17:00")}"></div>
+    <div><label>Max. Teilnehmer</label><input id="trCapacity" type="number" min="1" step="1" value="${s?.capacity||8}"></div>
+    <div><label>Spielstärke</label><select id="trLevel">${[["rot","Rot"],["orange","Orange"],["gruen","Grün"],["wettkampf","Wettkampf"]].map(([v,t])=>`<option value="${v}" ${v===(s?.level||"rot")?"selected":""}>${t}</option>`).join("")}</select></div>
+  </div><p class="muted">Das Training findet während der gewählten Trainingsperiode jede Woche statt.</p>
+  <button class="btn btn-primary" onclick="saveTraining('${id}')">${id?"Änderungen speichern":"Training hinzufügen"}</button>`;
+}
 function renderSetup(){
-  const slots=db.slots.filter(s=>s.season===currentSeason());
+  const slots=db.slots.filter(s=>s.season===currentSeason()).sort((a,b)=>trainingDays.indexOf(slotDay(a))-trainingDays.indexOf(slotDay(b))||a.time.localeCompare(b.time));
   if(!db.seasons.length){document.getElementById("content").innerHTML=`<div class="card"><h2>Keine Trainingsperiode vorhanden</h2><button class="btn btn-primary" onclick="createSeason()">Trainingsperiode anlegen</button></div>`;return;}
   document.getElementById("content").innerHTML=`<div class="grid grid-2">
     <div class="card"><h2>Trainingsperiode</h2>
@@ -749,26 +764,29 @@ function renderSetup(){
       <label><input id="seOpen" type="checkbox" style="width:auto" ${seasonObj().registrationOpen?"checked":""}> Anmeldung offen</label>
       <button class="btn btn-secondary" onclick="saveSeason()">Periode speichern</button>
       <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
-      <h3>Neue Trainingsperiode</h3>
-      <button class="btn btn-primary" onclick="createSeason()">Neue Saison anlegen</button>
+      <h3>Neue Trainingsperiode</h3><button class="btn btn-primary" onclick="createSeason()">Neue Saison anlegen</button>
     </div>
-    <div class="card"><h2>Neuen Slot anlegen</h2>
-      <div class="form-row">
-        <div><label>Datum</label><input id="nsDate" type="date" onchange="updateAutoWeekday()"></div>
-        <div><label>Wochentag (automatisch)</label><input id="nsDayAuto" type="text" readonly placeholder="Wird aus Datum berechnet"></div>
-        <div><label>Zeit</label><input id="nsTime" type="time" value="16:00"></div>
-        <div><label>Gruppe</label><input id="nsGroup" value="Gruppe A"></div>
-        <div><label>Spielstärke</label><select id="nsLevel"><option value="rot">Rot</option><option value="orange">Orange</option><option value="gruen">Grün</option><option value="wettkampf">Wettkampf</option></select></div>
-        <div><label>Kapazität</label><input id="nsCapacity" type="number" value="6" min="1" max="12"></div>
-        <div><label>Kosten CHF</label><input id="nsCost" type="number" value="450"></div>
-        <div><label>Dauer Min.</label><input id="nsDuration" type="number" value="60"></div>
-        <div><label>Coach</label><input id="nsCoach" value="Philippe"></div>
-      </div><button class="btn btn-primary" onclick="addSlot()">Slot hinzufügen</button>
-    </div>
-  </div><br><div class="card"><h2>Bestehende Slots</h2><div style="overflow:auto"><table><thead><tr><th>Datum / Tag / Zeit</th><th>Gruppe</th><th>Stufe</th><th>Plätze</th><th>Kosten</th><th>Coach</th><th></th></tr></thead><tbody>
-    ${slots.map(s=>`<tr><td><strong>${slotDate(s)}</strong><br>${s.day} ${s.time}</td><td>${esc(s.group)}</td><td>${levelLabel(s.level)}</td><td>${s.participants}/${s.capacity}</td><td>CHF ${s.cost}</td><td>${esc(s.coach)}</td><td><button class="btn btn-sm btn-danger" onclick="deleteSlot('${s.id}')">Löschen</button></td></tr>`).join("")}
+    <div class="card"><h2>Neues Training anlegen</h2>${trainingForm()}</div>
+  </div><br><div class="card"><h2>Bestehende Trainings</h2><div style="overflow:auto"><table><thead><tr><th>Tag / Zeit</th><th>Titel</th><th>Spielstärke</th><th>Plätze</th><th>Rhythmus</th><th>Aktionen</th></tr></thead><tbody>
+    ${slots.map(s=>`<tr><td>${esc(slotDay(s))}<br><strong>${esc(s.time)}–${esc(slotEnd(s))}</strong></td><td>${esc(s.group)}</td><td>${esc(levelLabel(s.level))}</td><td>${s.participants}/${s.capacity}</td><td>${s.recurring?"Wöchentlich":esc(slotDate(s))}</td><td><button class="btn btn-sm btn-secondary" onclick="editTraining('${s.id}')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="deleteSlot('${s.id}')">Löschen</button></td></tr>`).join("")||`<tr><td colspan="6">Noch keine Trainings vorhanden.</td></tr>`}
   </tbody></table></div></div>`;
   document.getElementById("seType").value=seasonObj().type;
+}
+function editTraining(id){const s=db.slots.find(x=>x.id===id);if(!s)return;openModal(`<h2>Training bearbeiten</h2>${trainingForm(s)}<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button></div>`);}
+async function saveTraining(id=""){
+  const val=k=>document.getElementById(k).value.trim();
+  const title=val("trTitle"),day=val("trDay"),start=val("trStart"),end=val("trEnd"),capacity=Number(val("trCapacity"));
+  if(!title||!start||!end||!trainingDays.includes(day)||!Number.isSafeInteger(capacity)||capacity<1){alert("Bitte alle Angaben korrekt ausfüllen.");return;}
+  if(end<=start){alert("Die Endzeit muss nach der Startzeit liegen.");return;}
+  const duration=(Number(end.slice(0,2))*60+Number(end.slice(3)))-(Number(start.slice(0,2))*60+Number(start.slice(3)));
+  const existing=id?db.slots.find(x=>x.id===id):null;
+  if(existing&&capacity<existing.participants){alert("Die Teilnehmerzahl darf nicht kleiner als die bestätigten Plätze sein.");return;}
+  const row={title,day,training_time:start,end_time:end,duration,capacity,level:val("trLevel"),is_recurring:true,training_date:null,group_name:title};
+  try{
+    if(id){const {error}=await authClient.from("training_slots").update(row).eq("id",id);if(error)throw error;}
+    else await writeRow("training_slots",{...row,season_id:currentSeason(),cost:0,coach:""},"insert");
+    closeModal();await refreshUI();
+  }catch(e){showDbError(e);}
 }
 async function saveSeason(){
   const s=seasonObj();if(!s)return;
@@ -780,22 +798,8 @@ async function createSeason(){
   catch(e){showDbError(e);}
 }
 
-function updateAutoWeekday(){
-  const date=document.getElementById("nsDate")?.value;
-  const field=document.getElementById("nsDayAuto");
-  if(field) field.value=weekdayFromDate(date);
-}
-async function addSlot(){
-  const val=id=>document.getElementById(id).value;
-  if(!val("nsDate")){alert("Bitte zuerst ein Datum auswählen.");return;}
-  try{
-    await writeRow("training_slots",{season_id:currentSeason(),training_date:val("nsDate"),day:weekdayFromDate(val("nsDate")),training_time:val("nsTime"),
-      duration:Number(val("nsDuration")),group_name:val("nsGroup"),level:val("nsLevel"),capacity:Number(val("nsCapacity")),cost:Number(val("nsCost")),coach:val("nsCoach")},"insert");
-    await refreshUI();
-  }catch(e){showDbError(e);}
-}
 async function deleteSlot(id){
-  if(!confirm("Slot wirklich löschen? Nur ohne bestehende Bewerbungen möglich."))return;
+  if(!confirm("Training wirklich löschen? Das ist nur ohne bestehende Bewerbungen möglich."))return;
   try{const {error}=await authClient.from("training_slots").delete().eq("id",id);if(error)throw error;await refreshUI();}catch(e){showDbError(e);}
 }
 
@@ -820,10 +824,10 @@ function renderExport(){
   </div></div>`;
 }
 function exportCSV(){
-  const rows=[["Saison","Kind","Eltern","E-Mail","Mobile","Spielstärke","Datum","Tag","Zeit","Gruppe","Coach","Betrag CHF","Status"]];
+  const rows=[["Saison","Kind","Eltern","E-Mail","Mobile","Spielstärke","Datum","Tag","Beginn","Ende","Trainingstitel","Coach","Betrag CHF","Status"]];
   db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted").forEach(a=>{
     const s=db.slots.find(x=>x.id===a.slotId)||{};
-    rows.push([seasonObj().name,a.child,a.parentName,a.email,a.mobile,levelLabel(a.level),s.date||"",slotDay(s),s.time||"",s.group||"",s.coach||"",s.cost||0,a.status]);
+    rows.push([seasonObj().name,a.child,a.parentName,a.email,a.mobile,levelLabel(a.level),s.date||"",slotDay(s),s.time||"",slotEnd(s),s.group||"",s.coach||"",s.cost||0,a.status]);
   });
   const csv="\ufeff"+rows.map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n");
   const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
