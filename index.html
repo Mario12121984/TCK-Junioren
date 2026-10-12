@@ -598,19 +598,24 @@ function slotCard(s){
   </div>`;
 }
 function openSlotParticipants(slotId){
-  if(session.role!=="parent") return;
+  // Teilnehmernamen nur nach Anmeldung anzeigen; keine Kontaktdaten ausgeben.
+  if(session.role!=="parent" || !session.email) return;
   const s=db.slots.find(x=>x.id===slotId);
   if(!s) return;
-  const accepted=db.applications.filter(a=>a.season===s.season && a.slotId===slotId && a.status==="accepted");
-  const names=accepted.map(a=>`<li><strong>${esc(a.child)}</strong></li>`).join("");
-  const missing=Math.max(0,(s.participants||0)-accepted.length);
-  const note=missing>0 ? `<p class="muted">${missing} weitere${missing===1?"r":""} Teilnehmer${missing===1?"":"/innen"} sind im Belegungsstand enthalten, aber in dieser lokalen Bewerbungsliste nicht mit Namen hinterlegt.</p>` : "";
-  openModal(`<h2>Teilnehmer</h2>
-    <p><strong>${slotDay(s)}, ${slotDate(s)}, ${s.time} · ${esc(s.group)}</strong><br><span class="level level-${s.level}">${levelLabel(s.level)}</span> · Coach ${esc(s.coach)}</p>
-    ${accepted.length?`<ul>${names}</ul>`:`<p class="muted">Noch keine bestätigten Teilnehmer mit Namen vorhanden.</p>`}
-    ${note}
+  const accepted=db.applications.filter(a=>a.season===s.season && a.slotId===slotId && a.status==="accepted" && String(a.child||"").trim());
+  const uniqueNames=[...new Set(accepted.map(a=>a.child.trim()))].sort((a,b)=>a.localeCompare(b,"de-CH"));
+  const names=uniqueNames.map(name=>`<li style="padding:7px 0;border-bottom:1px solid var(--line)"><strong>${esc(name)}</strong></li>`).join("");
+  const missing=Math.max(0,(Number(s.participants)||0)-uniqueNames.length);
+  openModal(`<h2>Teilnehmer dieser Trainingseinheit</h2>
+    <p><strong>${esc(slotDay(s))}, ${esc(slotDate(s))}, ${esc(s.time)} Uhr · ${esc(s.group)}</strong><br>
+    <span class="level level-${esc(s.level)}">${esc(levelLabel(s.level))}</span> · Coach ${esc(s.coach)}</p>
+    <div class="notice"><strong>${Number(s.participants)||0} von ${Number(s.capacity)||0} Plätzen belegt</strong></div>
+    ${uniqueNames.length?`<ol style="padding-left:24px">${names}</ol>`:`<p class="muted">Noch keine bestätigten Teilnehmer mit Namen hinterlegt.</p>`}
+    ${missing?`<p class="muted">${missing} weitere belegte ${missing===1?"Platz ist":"Plätze sind"} vorhanden; die Namen sind in den gespeicherten Bewerbungen nicht hinterlegt.</p>`:""}
+    <p class="muted">Es werden ausschliesslich Namen bestätigter Teilnehmer angezeigt, keine Kontaktdaten.</p>
     <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
 }
+
 function applyForSlot(slotId){
   const s=db.slots.find(x=>x.id===slotId);
   openModal(`<h2>Bewerbung für Trainingsplatz</h2>
