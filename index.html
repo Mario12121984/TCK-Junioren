@@ -715,14 +715,14 @@ function renderProfile(){
     grouped.get(key).push(a);
   }
   document.getElementById("content").innerHTML=`<div class="card"><h2>Meine Kinder & Kontaktdaten</h2>
-    <p class="muted">Hier sehen Sie die Kinder Ihrer Bewerbungen. Sie können Angaben bearbeiten oder einzelne Bewerbungen dauerhaft löschen. Andere Bewerbungen desselben Kindes bleiben bestehen.</p>
+    <p class="muted">Hier sehen Sie die Kinder Ihrer Bewerbungen. Angaben können bearbeitet werden. Löschen ist nur möglich, solange die Bewerbung noch offen und nicht vom Trainer bestätigt ist.</p>
     ${grouped.size?[...grouped.values()].map(group=>{
       const a=group[0];
       return `<div style="border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:12px">
         <h3 style="margin-bottom:6px">${esc(a.child)} <span class="muted">· Jahrgang ${esc(a.birthYear??"–")}</span></h3>
         <p class="muted">Stufe: ${esc(levelLabel(a.level))} · Eltern: ${esc(a.parentName)}<br>E-Mail: ${esc(a.email)} · Mobile: ${esc(a.mobile||"–")}</p>
         ${group.map(item=>{const slot=db.slots.find(s=>s.id===item.slotId);
-          return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:10px"><span class="muted">${esc(db.seasons.find(s=>s.id===item.season)?.name||"Trainingsperiode")} · ${esc(slot?slotDay(slot)+" "+slot.time:"Bewerbung")}</span><span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm btn-secondary" onclick="editParentContact('${item.id}')">Angaben bearbeiten</button><button class="btn btn-sm btn-danger" onclick="deleteParentApplication('${item.id}')">Löschen</button></span></div>`;
+          return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:10px"><span class="muted">${esc(db.seasons.find(s=>s.id===item.season)?.name||"Trainingsperiode")} · ${esc(slot?slotDay(slot)+" "+slot.time:"Bewerbung")}</span><span style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm btn-secondary" onclick="editParentContact('${item.id}')">Angaben bearbeiten</button>${item.status==="pending"&&!db.moves.some(m=>m.applicationId===item.id&&m.status==="pending")?`<button class="btn btn-sm btn-danger" onclick="deleteParentApplication('${item.id}')">Löschen</button>`:`<button class="btn btn-sm btn-danger" disabled title="Löschen nur vor der Trainerbestätigung möglich" style="opacity:.45;cursor:not-allowed">Löschen gesperrt</button>`}</span></div>`;
         }).join("")}
       </div>`;
     }).join(""):`<p class="muted">Für diesen Zugang wurden noch keine Kinder mit einer Bewerbung gefunden.</p>`}
@@ -762,6 +762,10 @@ async function saveParentContact(id){
 async function deleteParentApplication(id){
   if(session.role!=="parent")return;
   const a=db.applications.find(x=>String(x.id)===String(id));if(!a)return;
+  if(a.status!=="pending"){
+    alert("Diese Bewerbung wurde bereits bearbeitet oder bestätigt. Nur offene, noch nicht bestätigte Bewerbungen können gelöscht werden. Bitte den Admin kontaktieren.");
+    return;
+  }
   const slot=db.slots.find(s=>s.id===a.slotId);
   const place=slot?`${slotDay(slot)} ${slot.time}–${slotEnd(slot)}`:"ohne Training";
   const pending=db.moves.some(m=>m.applicationId===a.id&&m.status==="pending");
