@@ -1,64 +1,966 @@
--- TCK V15: einmalig im Supabase SQL Editor ausführen.
--- Voraussetzung: training_applications.id, training_slots.id sind UUID.
-create table if not exists public.training_move_requests (
-  id uuid primary key default gen_random_uuid(),
-  application_id uuid not null references public.training_applications(id) on delete cascade,
-  from_slot_id uuid not null references public.training_slots(id),
-  to_slot_id uuid not null references public.training_slots(id),
-  status text not null default 'pending' check (status in ('pending','accepted','rejected')),
-  created_at timestamptz not null default now(),
-  decided_at timestamptz,
-  check (from_slot_id <> to_slot_id)
-);
-create unique index if not exists one_pending_training_move_per_application
-  on public.training_move_requests(application_id) where status='pending';
-create index if not exists training_move_target_pending
-  on public.training_move_requests(to_slot_id) where status='pending';
-alter table public.training_move_requests enable row level security;
-revoke all on public.training_move_requests from anon, authenticated;
-grant select on public.training_move_requests to authenticated;
-drop policy if exists "staff and own parent can read moves" on public.training_move_requests;
-create policy "staff and own parent can read moves" on public.training_move_requests for select to authenticated
-using (
-  auth.jwt()->'app_metadata'->>'role' in ('admin','coach')
-  or exists (select 1 from public.training_applications a where a.id=application_id and lower(a.email)=lower(auth.jwt()->>'email'))
-);
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TCK Juniorentraining – Anmeldung & Planung</title>
+  <style>
+    :root{
+      --bg:#f4f7fb; --card:#ffffff; --text:#172033; --muted:#667085;
+      --primary:#1f6f54; --primary2:#155c45; --line:#e4e7ec;
+      --red:#ef4444; --orange:#f59e0b; --green:#22c55e; --blue:#3b82f6;
+      --shadow:0 10px 30px rgba(16,24,40,.08);
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    a{color:var(--primary)}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    .hidden{display:none!important}
+    .app{min-height:100vh}
+    header{
+      background:linear-gradient(135deg,#154f3c,#248261);
+      color:white;padding:22px 28px;display:flex;justify-content:space-between;align-items:center;
+      gap:16px;box-shadow:var(--shadow)
+    }
+    .brand h1{font-size:22px;margin:0 0 4px}
+    .brand small{opacity:.85}
+    .header-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .staff-entry{position:relative}
+    .staff-menu{position:absolute;right:0;top:calc(100% + 8px);min-width:300px;background:white;color:var(--text);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding:8px;z-index:30}
+    .staff-menu button{width:100%;text-align:left;border:0;background:white;padding:11px 12px;border-radius:9px;font-weight:700;color:var(--text)}
+    .staff-menu button:hover{background:#eef4f1;color:var(--primary)}
+    .pill{background:rgba(255,255,255,.15);padding:7px 10px;border-radius:999px;font-size:13px}
+    .ghost{background:white;color:var(--primary);border:0;border-radius:10px;padding:9px 12px;font-weight:700}
+    .container{max-width:1440px;margin:0 auto;padding:24px}
+    .login-wrap{max-width:560px;margin:60px auto}
+    .card{background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:20px}
+    h2,h3{margin-top:0}
+    .grid{display:grid;gap:18px}
+    .grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .form-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    label{font-size:13px;font-weight:700;display:block;margin-bottom:6px}
+    input,select,textarea{
+      width:100%;border:1px solid #d0d5dd;border-radius:10px;padding:10px 12px;background:white
+    }
+    textarea{min-height:88px;resize:vertical}
+    .btn{border:0;border-radius:10px;padding:10px 14px;font-weight:700}
+    .btn-primary{background:var(--primary);color:white}
+    .btn-primary:hover{background:var(--primary2)}
+    .btn-secondary{background:#eef4f1;color:var(--primary)}
+    .btn-danger{background:#fee2e2;color:#991b1b}
+    .btn-warning{background:#fff7ed;color:#9a3412}
+    .btn-sm{padding:7px 10px;font-size:13px}
+    .toolbar{display:flex;gap:10px;align-items:end;justify-content:space-between;flex-wrap:wrap;margin-bottom:18px}
+    .toolbar .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+    .notice{border-left:4px solid var(--primary);background:#eef7f3;padding:12px 14px;border-radius:8px;color:#27463b}
+    .muted{color:var(--muted);font-size:13px}
+    .tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}
+    .tab{border:1px solid var(--line);background:white;padding:9px 13px;border-radius:10px}
+    .tab.active{background:var(--primary);color:white;border-color:var(--primary)}
+    .week{overflow-x:auto}
+    .week-grid{display:grid;grid-template-columns:110px repeat(7,minmax(210px,1fr));min-width:1580px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+    .week-grid>div{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:10px;background:white}
+    .week-grid .head{background:#f8fafc;font-weight:800;text-align:center}
+    .time{background:#f8fafc!important;font-weight:700;color:#475467}
+    .slot{
+      border:1px solid #d6e7df;border-radius:12px;padding:10px;margin:4px 0;background:#f7fbf9
+    }
+    .week-cell.admin-cell{cursor:pointer;position:relative;min-height:100px}
+    .week-cell.admin-cell:hover{background:#f0f8f3}
+    .week-add{border:1px dashed #a8cdbb;background:#f4fbf7;color:#176347;border-radius:8px;padding:5px 9px;font-size:12px;font-weight:700;margin-top:6px}
+    .slot.interactive{cursor:pointer}
+    .slot.interactive:hover{box-shadow:0 3px 12px #0001;border-color:#75b89b}
+    .move-pending{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px;margin:7px 0;font-size:12px}
+    .slot.full{border-color:#fecaca;background:#fff7f7}
+    .slot .slot-title{display:flex;justify-content:space-between;gap:8px;font-weight:800;margin-bottom:4px}
+    .slot .meta{font-size:12px;color:var(--muted);line-height:1.5}
+    .level{display:inline-block;border-radius:999px;padding:3px 8px;font-size:12px;font-weight:800}
+    .level-rot{background:#fee2e2;color:#991b1b}
+    .level-orange{background:#ffedd5;color:#9a3412}
+    .level-gruen{background:#dcfce7;color:#166534}
+    .level-wettkampf{background:#dbeafe;color:#1d4ed8}
+    table{width:100%;border-collapse:collapse}
+    th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+    th{font-size:12px;text-transform:uppercase;color:#667085;background:#f8fafc}
+    .status{font-size:12px;font-weight:800;border-radius:999px;padding:4px 8px;display:inline-block}
+    .s-pending{background:#fff7ed;color:#9a3412}
+    .s-accepted{background:#dcfce7;color:#166534}
+    .s-rejected{background:#fee2e2;color:#991b1b}
+    .s-moved{background:#dbeafe;color:#1d4ed8}
+    .kpi{padding:16px;border-radius:14px;background:white;border:1px solid var(--line)}
+    .kpi strong{display:block;font-size:28px;margin-top:6px}
+    .modal{position:fixed;inset:0;background:rgba(15,23,42,.55);display:flex;align-items:center;justify-content:center;padding:20px;z-index:20}
+    .modal-box{width:min(720px,100%);max-height:90vh;overflow:auto;background:white;border-radius:16px;padding:22px}
+    .modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:16px}
+    .footer-note{margin-top:18px;color:#667085;font-size:12px}
+    @media(max-width:800px){
+      .grid-2,.grid-3,.form-row{grid-template-columns:1fr}
+      header{align-items:flex-start;flex-direction:column}
+      .container{padding:14px}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <h1>TCK Juniorentraining</h1>
+      <small>Anmeldung, Wochenplanung und Bewerbungsverwaltung</small>
+    </div>
+    <div class="header-actions">
+      <div class="staff-entry" id="staffEntry">
+        <button class="ghost" id="staffLoginBtn" onclick="toggleStaffMenu(event)">Anmelden</button>
+        <div class="staff-menu hidden" id="staffMenu">
+          <button onclick="openStaffLogin('coach')">Tennislehrer / J&amp;S Coach / Juniorenobmann</button>
+          <button onclick="openStaffLogin('admin')">Admin</button>
+        </div>
+      </div>
+      <span class="pill" id="sessionInfo">Nicht angemeldet</span>
+      <button class="ghost hidden" id="logoutBtn" onclick="logout()">Abmelden</button>
+    </div>
+  </header>
 
-create or replace function public.training_request_move(p_application_id uuid,p_to_slot_id uuid)
-returns void language plpgsql security definer set search_path = public, pg_temp as $$
-declare a public.training_applications%rowtype; target public.training_slots%rowtype; occupied integer; reserved integer;
-begin
- if auth.jwt()->'app_metadata'->>'role' <> 'admin' then raise exception 'Nur Admins dürfen Verschiebungen beantragen'; end if;
- select * into a from public.training_applications where id=p_application_id for update;
- if not found or a.status <> 'accepted' then raise exception 'Keine bestätigte Anmeldung gefunden'; end if;
- select * into target from public.training_slots where id=p_to_slot_id for update;
- if not found or target.season_id <> a.season_id or target.id=a.slot_id then raise exception 'Ungültiges Zieltraining'; end if;
- if exists(select 1 from public.training_move_requests where application_id=a.id and status='pending') then raise exception 'Es besteht bereits eine offene Verschiebung'; end if;
- select count(*) into occupied from public.training_applications where slot_id=target.id and status='accepted';
- select count(*) into reserved from public.training_move_requests where to_slot_id=target.id and status='pending';
- if occupied+reserved >= target.capacity then raise exception 'Zieltraining ist ausgebucht'; end if;
- insert into public.training_move_requests(application_id,from_slot_id,to_slot_id) values(a.id,a.slot_id,target.id);
-end $$;
+  <main class="container">
+    <section id="loginView" class="login-wrap">
+      <div class="card">
+        <h2>Eltern / Interessenten</h2>
+        <p class="muted">Bestehende Benutzer melden sich an. Neue Interessenten erstellen zuerst einen Zugang.</p>
+        <div id="supabaseConfigNotice" class="notice" style="margin-top:12px;display:none">
+          <strong>Supabase noch nicht konfiguriert.</strong><br>
+          Tragen Sie in der HTML-Datei <code>SUPABASE_URL</code> und <code>SUPABASE_PUBLISHABLE_KEY</code> ein.
+        </div>
+        <script>
+          window.addEventListener("DOMContentLoaded",()=>{
+            const n=document.getElementById("supabaseConfigNotice");
+            if(n && !supabaseConfigured) n.style.display="block";
+          });
+        </script>
 
-create or replace function public.training_answer_move(p_move_id uuid,p_accept boolean)
-returns void language plpgsql security definer set search_path = public, pg_temp as $$
-declare m public.training_move_requests%rowtype; a public.training_applications%rowtype; target public.training_slots%rowtype; occupied integer;
-begin
- select * into m from public.training_move_requests where id=p_move_id for update;
- if not found or m.status <> 'pending' then raise exception 'Anfrage nicht mehr offen'; end if;
- select * into a from public.training_applications where id=m.application_id for update;
- if lower(coalesce(a.email,'')) <> lower(coalesce(auth.jwt()->>'email','')) or auth.jwt()->>'email' is null
-    or auth.jwt()->'app_metadata'->>'role' in ('admin','coach') then raise exception 'Nur die zuständigen Eltern dürfen entscheiden'; end if;
- if a.slot_id <> m.from_slot_id or a.status <> 'accepted' then raise exception 'Die bisherige Einteilung wurde inzwischen geändert'; end if;
- if p_accept then
-   select * into target from public.training_slots where id=m.to_slot_id for update;
-   select count(*) into occupied from public.training_applications where slot_id=m.to_slot_id and status='accepted';
-   if occupied >= target.capacity then raise exception 'Das Zieltraining ist inzwischen ausgebucht'; end if;
-   update public.training_applications set slot_id=m.to_slot_id where id=a.id;
- end if;
- update public.training_move_requests set status=case when p_accept then 'accepted' else 'rejected' end, decided_at=now() where id=m.id;
-end $$;
-revoke all on function public.training_request_move(uuid,uuid) from public, anon;
-revoke all on function public.training_answer_move(uuid,boolean) from public, anon;
-grant execute on function public.training_request_move(uuid,uuid) to authenticated;
-grant execute on function public.training_answer_move(uuid,boolean) to authenticated;
+        <div class="tabs" style="margin-top:14px">
+          <button class="tab active" id="parentLoginTab" onclick="showParentAccess('login')">Anmelden</button>
+          <button class="tab" id="parentRegisterTab" onclick="showParentAccess('register')">Neuanmeldung</button>
+        </div>
+
+        <div id="parentLoginPane" class="grid">
+          <div>
+            <label>E-Mail</label>
+            <input id="loginEmail" type="email" placeholder="name@example.ch" />
+          </div>
+          <div>
+            <label>Passwort</label>
+            <input id="loginPassword" type="password" placeholder="Passwort" />
+          </div>
+          <button class="btn btn-primary" onclick="login()">Anmelden</button>
+          <button class="btn btn-secondary" onclick="openForgotPassword()">Passwort vergessen?</button>
+          <div class="footer-note">Anmeldung mit dem Passwort, das nach der E-Mail-Aktivierung festgelegt wurde.</div>
+        </div>
+
+        <div id="parentRegisterPane" class="grid hidden">
+          <div>
+            <label>Name Eltern / Kontaktperson</label>
+            <input id="registerParentName" type="text" placeholder="Vorname Nachname" />
+          </div>
+          <div>
+            <label>E-Mail</label>
+            <input id="registerEmail" type="email" placeholder="name@example.ch" />
+          </div>
+          <button class="btn btn-primary" onclick="sendRegistrationLink()">Registrierungslink senden</button>
+          <div class="notice">
+            Das Passwort wird nicht per E-Mail verschickt. Der neue Benutzer erhält einen persönlichen Link und legt sein Passwort selbst fest.
+          </div>
+          <div class="footer-note">Die E-Mail wird über Supabase Auth versendet. Für beliebige externe E-Mail-Adressen muss in Supabase ein eigener SMTP-Dienst eingerichtet werden.</div>
+        </div>
+
+        <div id="registrationSentPane" class="hidden">
+          <div class="notice">
+            <strong>Registrierungs-E-Mail versendet.</strong><br>
+            Wir haben einen persönlichen Link an <span id="registrationSentEmail"></span> gesendet.
+          </div>
+          <p class="muted" style="margin-top:14px">Der Link sollte zeitlich begrenzt und nur einmal verwendbar sein.</p>
+          <button class="btn btn-secondary" style="width:100%;margin-top:10px" onclick="showParentAccess('login')">Zur Anmeldung</button>
+        </div>
+
+        <div class="footer-note">Tennislehrer, J&amp;S Coach, Juniorenobmann und Admin melden sich oben rechts an.</div><div class="footer-note"><strong>Supabase:</strong> Passwörter und Sitzungen werden durch Supabase Auth verwaltet und nicht im localStorage dieser Anwendung gespeichert.</div>
+      </div>
+    </section>
+
+    <section id="appView" class="hidden">
+      <div class="toolbar">
+        <div class="filters">
+          <div>
+            <label>Trainingsperiode</label>
+            <select id="seasonSelect" onchange="renderAll()"></select>
+          </div>
+          <div id="parentChildFilterWrap">
+            <label>Spielstärke</label>
+            <select id="levelFilter" onchange="renderWeek()">
+              <option value="all">Alle</option>
+              <option value="rot">Rot</option>
+              <option value="orange">Orange</option>
+              <option value="gruen">Grün</option>
+              <option value="wettkampf">Wettkampf</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <button class="btn btn-secondary" onclick="openInfo()">Spielstärken & Trainingsinfo</button>
+        </div>
+      </div>
+
+      <div id="roleTabs" class="tabs"></div>
+      <div id="content"></div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="modal hidden" onclick="closeModalOutside(event)">
+  <div class="modal-box" id="modalBox"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+/* =========================================================
+   SUPABASE KONFIGURATION
+   1. Project URL aus Supabase > Project Settings > API
+   2. Publishable Key (sb_publishable_...) hier eintragen
+   WICHTIG: Niemals den service_role Key im Browser verwenden.
+   ========================================================= */
+const SUPABASE_URL = "https://hjolpnovopamdcurkdag.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_sLJejcjsPNruTnHrdiUgUw_N0AcBmnu";
+
+const supabaseConfigured =
+  !SUPABASE_URL.includes("DEIN-PROJEKT") &&
+  !SUPABASE_PUBLISHABLE_KEY.includes("DEIN_PUBLISHABLE_KEY");
+
+const authClient = supabaseConfigured
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+      }
+    })
+  : null;
+
+const seed = {
+  seasons: [
+    {id:"winter-2026",name:"Wintertraining 2026/27",type:"Winter",active:true, registrationOpen:true},
+    {id:"summer-2027",name:"Sommertraining 2027",type:"Sommer",active:false, registrationOpen:true}
+  ],
+  slots: [
+    // Winter Mo 16-19
+    {id:"w-mo-16-a",season:"winter-2026",day:"Montag",date:"2026-10-19",time:"16:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:420,coach:"Philippe",participants:2},
+    {id:"w-mo-16-b",season:"winter-2026",day:"Montag",date:"2026-10-19",time:"16:00",duration:60,group:"Gruppe B",level:"orange",capacity:6,cost:420,coach:"Nina",participants:5},
+    {id:"w-mo-17-a",season:"winter-2026",day:"Montag",date:"2026-10-19",time:"17:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:480,coach:"Philippe",participants:4},
+    {id:"w-mo-18-a",season:"winter-2026",day:"Montag",date:"2026-10-19",time:"18:00",duration:60,group:"Gruppe A",level:"wettkampf",capacity:6,cost:560,coach:"Philippe",participants:6},
+    // Winter Mi 13-18
+    {id:"w-mi-13-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"13:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:420,coach:"Lea",participants:1},
+    {id:"w-mi-14-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"14:00",duration:60,group:"Gruppe A",level:"orange",capacity:6,cost:420,coach:"Lea",participants:3},
+    {id:"w-mi-15-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"15:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:480,coach:"Philippe",participants:4},
+    {id:"w-mi-16-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"16:00",duration:60,group:"Gruppe A",level:"wettkampf",capacity:6,cost:560,coach:"Philippe",participants:5},
+    {id:"w-mi-17-a",season:"winter-2026",day:"Mittwoch",date:"2026-10-21",time:"17:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:480,coach:"Nina",participants:2},
+    // Winter Fr 16-20
+    {id:"w-fr-16-a",season:"winter-2026",day:"Freitag",date:"2026-10-23",time:"16:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:420,coach:"Lea",participants:3},
+    {id:"w-fr-17-a",season:"winter-2026",day:"Freitag",date:"2026-10-23",time:"17:00",duration:60,group:"Gruppe A",level:"orange",capacity:6,cost:420,coach:"Nina",participants:5},
+    {id:"w-fr-18-a",season:"winter-2026",day:"Freitag",date:"2026-10-23",time:"18:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:480,coach:"Philippe",participants:4},
+    {id:"w-fr-19-a",season:"winter-2026",day:"Freitag",date:"2026-10-23",time:"19:00",duration:60,group:"Gruppe A",level:"wettkampf",capacity:6,cost:560,coach:"Philippe",participants:3},
+
+    // Summer examples, including parallel groups
+    {id:"s-mo-16-a",season:"summer-2027",day:"Montag",date:"2027-05-03",time:"16:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:390,coach:"Lea",participants:2},
+    {id:"s-mo-16-b",season:"summer-2027",day:"Montag",date:"2027-05-03",time:"16:00",duration:60,group:"Gruppe B",level:"orange",capacity:6,cost:390,coach:"Nina",participants:4},
+    {id:"s-mo-16-c",season:"summer-2027",day:"Montag",date:"2027-05-03",time:"16:00",duration:60,group:"Gruppe C",level:"gruen",capacity:6,cost:450,coach:"Philippe",participants:5},
+    {id:"s-mi-13-a",season:"summer-2027",day:"Mittwoch",date:"2027-05-05",time:"13:00",duration:60,group:"Gruppe A",level:"rot",capacity:4,cost:390,coach:"Lea",participants:1},
+    {id:"s-mi-15-a",season:"summer-2027",day:"Mittwoch",date:"2027-05-05",time:"15:00",duration:90,group:"Gruppe A",level:"wettkampf",capacity:6,cost:540,coach:"Philippe",participants:4},
+    {id:"s-fr-16-a",season:"summer-2027",day:"Freitag",date:"2027-05-07",time:"16:00",duration:60,group:"Gruppe A",level:"orange",capacity:6,cost:390,coach:"Nina",participants:2},
+    {id:"s-fr-18-a",season:"summer-2027",day:"Freitag",date:"2027-05-07",time:"18:00",duration:60,group:"Gruppe A",level:"gruen",capacity:6,cost:450,coach:"Philippe",participants:3}
+  ],
+  applications: [
+    {id:"a1",season:"winter-2026",slotId:"w-mi-15-a",parentName:"Muster Familie",email:"muster@example.ch",mobile:"+41 79 000 00 00",child:"Luca Muster",birthYear:2014,level:"gruen",status:"pending",comment:"Mittwoch wäre ideal.",coachComment:"",created:"2026-09-05"},
+    {id:"a2",season:"winter-2026",slotId:"w-fr-17-a",parentName:"Sandra Beispiel",email:"sandra@example.ch",mobile:"+41 78 111 11 11",child:"Mia Beispiel",birthYear:2016,level:"orange",status:"accepted",comment:"",coachComment:"Willkommen im Freitagstraining.",created:"2026-09-03"}
+  ],
+  contacts: [
+    {id:"c1",child:"Luca Muster",parentName:"Muster Familie",email:"muster@example.ch",mobile:"+41 79 000 00 00",level:"gruen",source:"Clubdesk"},
+    {id:"c2",child:"Mia Beispiel",parentName:"Sandra Beispiel",email:"sandra@example.ch",mobile:"+41 78 111 11 11",level:"orange",source:"Clubdesk"}
+  ]
+};
+
+let db = {seasons:[],slots:[],applications:[],contacts:[],moves:[]};
+let moveTableAvailable=true;
+let session = {role:null,email:null,tab:null};
+
+// V10: Alle Trainings- und Bewerbungsdaten kommen ausschliesslich aus Supabase.
+async function reloadData(){
+  if(!authClient) throw new Error("Supabase ist nicht konfiguriert.");
+  const read=async(table)=>{const {data,error}=await authClient.from(table).select("*");if(error)throw error;return data||[]};
+  const seasons=await read("training_seasons");
+  const slots=await read("training_slots");
+  const apps=await read("training_applications");
+  db.seasons=seasons.map(x=>({id:x.id,name:x.name,type:x.type,active:x.active,registrationOpen:x.registration_open}));
+  db.slots=slots.map(x=>({id:x.id,season:x.season_id,day:x.day,date:x.training_date,time:x.training_time.slice(0,5),duration:x.duration,group:x.title||x.group_name||"Training",endTime:x.end_time?.slice(0,5)||"",recurring:!!x.is_recurring,level:x.level,capacity:x.capacity,cost:x.cost,coach:x.coach,participants:0}));
+  db.applications=apps.map(x=>({id:x.id,season:x.season_id,slotId:x.slot_id,parentName:x.parent_name,email:x.email,mobile:x.mobile,child:x.child,birthYear:x.birth_year,level:x.level,status:x.status,comment:x.comment,coachComment:x.coach_comment,created:x.created_at.slice(0,10)}));
+  // Nur bestätigte Einträge zählen; Eltern erhalten die Belegungszahlen über eine separate, datensparsame RPC.
+  if(session.role==="parent"){
+    const {data,error}=await authClient.rpc("training_slot_counts");if(error)throw error;
+    for(const item of data||[]){const slot=db.slots.find(s=>s.id===item.slot_id);if(slot)slot.participants=Number(item.confirmed_count);}
+  }else{
+    for(const slot of db.slots)slot.participants=db.applications.filter(a=>a.slotId===slot.id&&a.status==="accepted").length;
+  }
+  db.contacts=[];
+  const {data:moveRows,error:moveError}=await authClient.from("training_move_requests").select("*");
+  if(moveError){
+    moveTableAvailable=false;db.moves=[];
+    console.warn("Verschiebungsanfragen konnten nicht geladen werden:",moveError);
+  }else{
+    moveTableAvailable=true;
+    db.moves=(moveRows||[]).map(m=>({id:m.id,applicationId:m.application_id,fromSlotId:m.from_slot_id,toSlotId:m.to_slot_id,status:m.status,created:m.created_at,decided:m.decided_at}));
+  }
+}
+async function refreshUI(){await reloadData();fillSeasons();renderTabs();renderAll();}
+async function writeRow(table,row,method="upsert"){
+  const {error}=await authClient.from(table)[method](row);if(error)throw error;
+}
+function showDbError(error){console.error(error);alert("Supabase-Fehler: "+(error?.message||error)+". Bitte SQL-Skript und Berechtigungen prüfen.");}
+
+function esc(s){ return String(s ?? "").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[m]));}
+function currentSeason(){ return document.getElementById("seasonSelect").value || db.seasons[0]?.id || ""; }
+function seasonObj(){ return db.seasons.find(s=>s.id===currentSeason()); }
+function levelLabel(l){ return ({rot:"Rot",orange:"Orange",gruen:"Grün",wettkampf:"Wettkampf"})[l]||l; }
+function formatDate(date){
+  if(!date) return "Datum noch nicht festgelegt";
+  const [y,m,d]=date.split("-");
+  return `${d}.${m}.${y}`;
+}
+function slotDate(s){ return s.recurring ? "Wöchentlich" : formatDate(s.date); }
+function weekdayFromDate(date){
+  if(!date) return "";
+  const [y,m,d]=date.split("-").map(Number);
+  const names=["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
+  return names[new Date(y,m-1,d).getDay()];
+}
+function slotDay(s){ return s.recurring ? s.day : (weekdayFromDate(s.date) || s.day || ""); }
+function slotEnd(s){if(s.endTime)return s.endTime;const [h,m]=(s.time||"00:00").split(":").map(Number);const total=h*60+m+(Number(s.duration)||60);return `${String(Math.floor(total/60)%24).padStart(2,"0")}:${String(total%60).padStart(2,"0")}`;}
+const trainingDays=["Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag","Sonntag"];
+
+
+
+function showParentAccess(mode){
+  const isLogin=mode==="login";
+  document.getElementById("parentLoginPane").classList.toggle("hidden", !isLogin);
+  document.getElementById("parentRegisterPane").classList.toggle("hidden", isLogin);
+  document.getElementById("registrationSentPane").classList.add("hidden");
+  document.getElementById("parentLoginTab").classList.toggle("active", isLogin);
+  document.getElementById("parentRegisterTab").classList.toggle("active", !isLogin);
+}
+
+function requireSupabase(){
+  if(authClient) return true;
+  alert("Supabase ist noch nicht konfiguriert. Bitte SUPABASE_URL und SUPABASE_PUBLISHABLE_KEY oben in der HTML-Datei eintragen.");
+  return false;
+}
+
+function redirectUrl(mode){
+  if(location.protocol==="file:"){
+    alert("Für echte E-Mail-Links muss diese HTML-Datei über http://localhost oder eine https://Webadresse geöffnet werden – nicht direkt als file:// Datei.");
+  }
+  const url=new URL(location.href);
+  url.hash="";
+  url.search="";
+  url.searchParams.set("auth",mode);
+  return url.toString();
+}
+
+async function sendRegistrationLink(){
+  if(!requireSupabase()) return;
+  const name=document.getElementById("registerParentName").value.trim();
+  const email=document.getElementById("registerEmail").value.trim();
+  if(!name || !email){ alert("Bitte Name und E-Mail ausfüllen."); return; }
+
+  const { error } = await authClient.auth.signInWithOtp({
+    email,
+    options:{
+      shouldCreateUser:true,
+      emailRedirectTo:redirectUrl("activate"),
+      data:{ name, role:"parent" }
+    }
+  });
+
+  if(error){
+    alert("Registrierungs-E-Mail konnte nicht gesendet werden: "+error.message);
+    return;
+  }
+
+  document.getElementById("parentLoginPane").classList.add("hidden");
+  document.getElementById("parentRegisterPane").classList.add("hidden");
+  document.getElementById("registrationSentPane").classList.remove("hidden");
+  document.getElementById("registrationSentEmail").textContent=email;
+}
+
+async function login(){
+  if(!requireSupabase()) return;
+  const email=(document.getElementById("loginEmail").value || "").trim();
+  const password=document.getElementById("loginPassword").value;
+  if(!email || !password){ alert("Bitte E-Mail und Passwort eingeben."); return; }
+
+  const { data, error } = await authClient.auth.signInWithPassword({ email, password });
+  if(error){
+    alert("E-Mail oder Passwort ist nicht korrekt.");
+    return;
+  }
+
+  const role=data.user?.app_metadata?.role;
+  if(role==="coach" || role==="admin"){
+    await authClient.auth.signOut();
+    alert("Dieser Zugang gehört zum Juniorenteam/Admin. Bitte oben rechts anmelden.");
+    return;
+  }
+  enterSession("parent", data.user.email);
+}
+
+function openSetPassword(mode){
+  const title=mode==="recovery" ? "Neues Passwort festlegen" : "Zugang aktivieren";
+  openModal(`<h2>${title}</h2>
+    <p class="muted">${mode==="recovery" ? "Wählen Sie ein neues Passwort." : "Legen Sie jetzt Ihr persönliches Passwort fest."}</p>
+    <div class="grid">
+      <div><label>Neues Passwort</label><input id="newAuthPassword" type="password" placeholder="Mindestens 6 Zeichen"></div>
+      <div><label>Passwort bestätigen</label><input id="newAuthPassword2" type="password" placeholder="Passwort wiederholen"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" onclick="saveSupabasePassword('${mode}')">Passwort speichern</button>
+    </div>`);
+}
+
+async function saveSupabasePassword(mode){
+  if(!requireSupabase()) return;
+  const pw=document.getElementById("newAuthPassword").value;
+  const pw2=document.getElementById("newAuthPassword2").value;
+  if(!pw || pw.length<6){ alert("Bitte ein Passwort mit mindestens 6 Zeichen wählen."); return; }
+  if(pw!==pw2){ alert("Die Passwörter stimmen nicht überein."); return; }
+
+  const { data, error } = await authClient.auth.updateUser({ password:pw });
+  if(error){
+    alert("Passwort konnte nicht gespeichert werden: "+error.message);
+    return;
+  }
+
+  closeModal();
+  const clean=new URL(location.href);
+  clean.searchParams.delete("auth");
+  clean.hash="";
+  history.replaceState({}, "", clean.pathname + (clean.search ? clean.search : ""));
+  enterSession("parent", data.user.email);
+}
+
+function openForgotPassword(){
+  const email=document.getElementById("loginEmail").value.trim();
+  openModal(`<h2>Passwort vergessen?</h2>
+    <p class="muted">Supabase sendet einen Link zum Festlegen eines neuen Passworts.</p>
+    <div><label>E-Mail</label><input id="forgotEmail" type="email" value="${esc(email)}" placeholder="name@example.ch"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="sendPasswordReset()">Reset-Link senden</button>
+    </div>`);
+}
+
+async function sendPasswordReset(){
+  if(!requireSupabase()) return;
+  const email=document.getElementById("forgotEmail").value.trim();
+  if(!email){ alert("Bitte E-Mail eingeben."); return; }
+
+  const { error } = await authClient.auth.resetPasswordForEmail(email,{
+    redirectTo:redirectUrl("recovery")
+  });
+
+  closeModal();
+  if(error){
+    alert("Reset-E-Mail konnte nicht gesendet werden: "+error.message);
+    return;
+  }
+
+  openModal(`<h2>E-Mail prüfen</h2>
+    <div class="notice">Falls für <strong>${esc(email)}</strong> ein Zugang besteht, wurde ein Link zum Zurücksetzen des Passworts gesendet.</div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+}
+
+function toggleStaffMenu(event){
+  if(event) event.stopPropagation();
+  document.getElementById("staffMenu").classList.toggle("hidden");
+}
+
+function openStaffLogin(role){
+  document.getElementById("staffMenu").classList.add("hidden");
+  const title=role==="admin" ? "Admin" : "Tennislehrer / J&S Coach / Juniorenobmann";
+  openModal(`<h2>${title} – Anmeldung</h2>
+    <div class="grid">
+      <div><label>E-Mail</label><input id="staffPopupEmail" type="email" placeholder="name@tck.ch"></div>
+      <div><label>Passwort</label><input id="staffPopupPassword" type="password" placeholder="Passwort"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>
+      <button class="btn btn-primary" onclick="submitStaffLogin('${role}')">Anmelden</button>
+    </div>`);
+  setTimeout(()=>document.getElementById("staffPopupEmail")?.focus(),0);
+}
+
+async function submitStaffLogin(role){
+  if(!requireSupabase()) return;
+  const email=document.getElementById("staffPopupEmail").value.trim();
+  const password=document.getElementById("staffPopupPassword").value;
+  if(!email || !password){ alert("Bitte E-Mail und Passwort eingeben."); return; }
+
+  const { data, error } = await authClient.auth.signInWithPassword({email,password});
+  if(error){
+    alert("E-Mail oder Passwort ist nicht korrekt.");
+    return;
+  }
+
+  const storedRole=data.user?.app_metadata?.role;
+  const allowed = storedRole===role || (role==="coach" && storedRole==="admin");
+  if(!allowed){
+    await authClient.auth.signOut();
+    alert(role==="admin"
+      ? "Dieser Benutzer besitzt keine Admin-Berechtigung."
+      : "Dieser Benutzer besitzt keine Berechtigung für das Juniorenteam.");
+    return;
+  }
+
+  closeModal();
+  // Admin behält immer die Admin-Rolle und damit sämtliche Rechte,
+  // auch wenn der Einstieg über Tennislehrer / Juniorenobmann erfolgt.
+  enterSession(storedRole==="admin" ? "admin" : role,data.user.email);
+}
+
+function enterSession(role,email){
+  session.role = role;
+  session.email = email;
+  session.tab = session.role==="parent" ? "week" : session.role==="coach" ? "applications" : "setup";
+  document.getElementById("loginView").classList.add("hidden");
+  document.getElementById("appView").classList.remove("hidden");
+  document.getElementById("logoutBtn").classList.remove("hidden");
+  document.getElementById("staffEntry").classList.add("hidden");
+  const labels={parent:"Eltern",coach:"Headcoach / Juniorenteam",admin:"Admin"};
+  document.getElementById("sessionInfo").textContent=`${labels[session.role]} · ${session.email}`;
+  document.getElementById("content").innerHTML="<div class=notice>Trainingsdaten werden aus Supabase geladen …</div>";
+  refreshUI().catch(showDbError);
+}
+
+async function logout(){
+  if(authClient) await authClient.auth.signOut();
+  session={role:null,email:null,tab:null};
+  document.getElementById("appView").classList.add("hidden");
+  document.getElementById("loginView").classList.remove("hidden");
+  document.getElementById("logoutBtn").classList.add("hidden");
+  document.getElementById("staffEntry").classList.remove("hidden");
+  document.getElementById("sessionInfo").textContent="Nicht angemeldet";
+  showParentAccess("login");
+}
+
+async function restoreSupabaseSession(){
+  if(!authClient) return;
+  const mode=new URL(location.href).searchParams.get("auth");
+
+  const { data:{session:authSession} } = await authClient.auth.getSession();
+  if(!authSession) return;
+
+  if(mode==="activate"){
+    openSetPassword("activate");
+    return;
+  }
+  if(mode==="recovery"){
+    openSetPassword("recovery");
+    return;
+  }
+
+  const user=authSession.user;
+  const role=user?.app_metadata?.role;
+  if(role==="admin") enterSession("admin",user.email);
+  else if(role==="coach") enterSession("coach",user.email);
+  else enterSession("parent",user.email);
+}
+
+function fillSeasons(){
+  const el=document.getElementById("seasonSelect");
+  const prev=el.value;
+  el.innerHTML=db.seasons.map(s=>`<option value="${s.id}">${esc(s.name)}${s.registrationOpen?" · Anmeldung offen":""}</option>`).join("");
+  if(db.seasons.some(s=>s.id===prev)) el.value=prev;
+}
+function renderTabs(){
+  const tabs = session.role==="parent"
+    ? [["week","Wochenplan"],["myapps","Meine Bewerbungen"],["profile","Kind / Kontakt"]]
+    : session.role==="coach"
+    ? [["applications","Bewerbungen"],["week","Wochenplan"],["participants","Teilnehmer"]]
+    : [["setup","Wochenplan-Setup"],["applications","Bewerbungen"],["week","Wochenplan"],["participants","Teilnehmer"],["contacts","Kontakte"],["export","Abrechnung / Export"]];
+  document.getElementById("roleTabs").innerHTML=tabs.map(([id,label])=>`<button class="tab ${session.tab===id?"active":""}" onclick="setTab('${id}')">${label}</button>`).join("");
+  document.getElementById("parentChildFilterWrap").classList.toggle("hidden", session.role!=="parent" && session.tab!=="week");
+}
+function setTab(t){session.tab=t;renderTabs();renderAll();}
+function renderAll(){
+  if(!session.role) return;
+  if(session.tab==="week") renderWeek();
+  else if(session.tab==="myapps") renderMyApps();
+  else if(session.tab==="profile") renderProfile();
+  else if(session.tab==="applications") renderApplications();
+  else if(session.tab==="participants") renderParticipants();
+  else if(session.tab==="setup") renderSetup();
+  else if(session.tab==="contacts") renderContacts();
+  else if(session.tab==="export") renderExport();
+}
+
+function weekMoveSummary(){
+  if(session.role!=="admin")return "";
+  const pending=db.moves.filter(m=>m.status==="pending"&&db.applications.some(a=>a.id===m.applicationId&&a.season===currentSeason()));
+  return `<div class="card" style="margin:0 0 16px"><h3 style="margin-bottom:8px">Ausstehende Verschiebungen (${pending.length})</h3>
+    ${!moveTableAvailable?`<div class="notice">Die SQL-Erweiterung für Verschiebungen fehlt oder ist nicht zugänglich.</div>`:""}
+    ${pending.length?pending.map(m=>{const a=db.applications.find(x=>x.id===m.applicationId),from=db.slots.find(x=>x.id===m.fromSlotId),to=db.slots.find(x=>x.id===m.toSlotId);
+      return `<div class="move-pending"><strong>${esc(a?.child||"Teilnehmer")}</strong>: ${esc(from?.day||"")} ${esc(from?.time||"")} (${esc(from?.group||"")}) → ${esc(to?.day||"")} ${esc(to?.time||"")} (${esc(to?.group||"")}) · <strong>Elternbestätigung offen</strong></div>`;
+    }).join(""):`<p class="muted">Keine offenen Verschiebungsanfragen.</p>`}</div>`;
+}
+function renderWeek(){
+  if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Noch keine Trainingsperiode vorhanden.</div>";return;}
+  const sid=currentSeason(),filter=document.getElementById("levelFilter")?.value||"all";
+  const slots=db.slots.filter(s=>s.season===sid&&(filter==="all"||s.level===filter));
+  const times=[...new Set([...slots.map(s=>s.time),...(session.role==="admin"?Array.from({length:12},(_,i)=>`${String(i+9).padStart(2,"0")}:00`):[])])].sort();
+  let html=`<div class="notice"><strong>${esc(seasonObj().name)}</strong> – ${seasonObj().registrationOpen?"Bewerbungen sind aktuell möglich.":"Anmeldung geschlossen."} Ein Trainingsplatz ist erst nach Bestätigung durch den Headcoach definitiv.</div><br>`;
+  html+=weekMoveSummary();
+  html+=`<div class="week"><div class="week-grid"><div class="head">Zeit</div>${trainingDays.map(d=>`<div class="head">${d}</div>`).join("")}`;
+  times.forEach(t=>{
+    html+=`<div class="time">${t}</div>`;
+    trainingDays.forEach(day=>{
+      const list=slots.filter(s=>s.time===t&&slotDay(s)===day);
+      const admin=session.role==="admin";
+      html+=`<div class="week-cell ${admin?"admin-cell":""}" ${admin?`onclick="if(event.target===this)openWeekCreate('${day}','${t}')"`:""}>${list.map(slotCard).join("")}${admin?`<button class="week-add" onclick="openWeekCreate('${day}','${t}')">+ Training</button>`:(!list.length?`<span class="muted">–</span>`:"")}</div>`;
+    });
+  });
+  html+=`</div></div>`;
+  document.getElementById("content").innerHTML=html;
+}
+function slotCard(s){
+  const reserved=db.moves.filter(m=>m.toSlotId===s.id&&m.status==="pending").length;
+  const free=Math.max(0,s.capacity-s.participants-(session.role==="admin"?reserved:0));
+  const full=free===0;
+  const action=session.role==="parent"&&seasonObj().registrationOpen
+    ? `<button class="btn btn-sm ${full?"btn-warning":"btn-primary"}" onclick="event.stopPropagation();applyForSlot('${s.id}')">${full?"Warteliste":"Bewerben"}</button>`:"";
+  const clickable=session.role==="parent"||session.role==="admin"||session.role==="coach";
+  return `<div class="slot ${full?"full":""} ${clickable?"interactive":""}" ${clickable?`onclick="event.stopPropagation();openSlotParticipants('${s.id}')" title="Teilnehmer anzeigen"`:""}>
+    <div class="slot-title"><span>${esc(s.group)}</span><span class="level level-${s.level}">${levelLabel(s.level)}</span></div>
+    <div class="meta"><strong>${esc(slotDay(s))}${s.recurring?" · wöchentlich":" · "+slotDate(s)}</strong><br>${esc(s.time)}–${esc(slotEnd(s))} Uhr<br>${s.participants}/${s.capacity} belegt · <strong>${free} frei</strong>${s.coach?`<br>Trainer: ${esc(s.coach)}`:""}${session.role==="admin"&&reserved?`<br>${reserved} Platz/Plätze für Verschiebung reserviert`:""}</div>
+    ${action?`<div style="margin-top:8px">${action}</div>`:""}
+  </div>`;
+}
+async function openSlotParticipants(slotId){
+  if(!session.role)return;
+  const s=db.slots.find(x=>x.id===slotId);if(!s)return;
+  if(session.role==="parent"){
+    openModal("<h2>Teilnehmer dieser Trainingseinheit</h2><p>Lade bestätigte Teilnehmer …</p>");
+    try{
+      const {data,error}=await authClient.rpc("training_participant_names",{p_slot_id:slotId});if(error)throw error;
+      const names=(data||[]).map(x=>String(x.child_name||"").trim()).filter(Boolean);
+      openModal(`<h2>Teilnehmer dieser Trainingseinheit</h2><p><strong>${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(s.group)}</strong></p><div class="notice">${s.participants}/${s.capacity} Plätze belegt</div>${names.length?`<ol>${names.map(n=>`<li>${esc(n)}</li>`).join("")}</ol>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}<p class="muted">Es werden nur Namen angezeigt.</p><div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+    }catch(e){closeModal();showDbError(e);}return;
+  }
+  const apps=db.applications.filter(a=>a.slotId===slotId&&a.status==="accepted");
+  const pending=db.moves.filter(m=>m.fromSlotId===slotId&&m.status==="pending");
+  openModal(`<h2>${esc(s.group)} – Teilnehmer</h2><p class="muted">${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(levelLabel(s.level))} · Trainer: ${esc(s.coach||"–")}</p>
+    <div class="notice">${apps.length}/${s.capacity} Plätze belegt</div>
+    ${apps.length?`<div style="overflow:auto"><table><thead><tr><th>Teilnehmer</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${apps.map(a=>{const isPending=pending.some(m=>m.applicationId===a.id);return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">${esc(a.parentName||"")}</span></td><td>${isPending?`<span class="status s-pending">Elternbestätigung offen</span>`:`<span class="status s-accepted">Bestätigt</span>`}</td><td>${session.role==="admin"?`<button class="btn btn-sm btn-secondary" ${isPending?"disabled":""} onclick="openMoveDialog('${a.id}')">Verschieben</button>`:"–"}</td></tr>`}).join("")}</tbody></table></div>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}
+    <div class="modal-actions">${session.role==="admin"?`<button class="btn btn-secondary" onclick="editTraining('${s.id}')">Training bearbeiten</button>`:""}<button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+}
+function applyForSlot(slotId){
+  const s=db.slots.find(x=>x.id===slotId);
+  if(!s)return;
+  openModal(`<h2>Bewerbung für Trainingsplatz</h2>
+    <p><strong>${slotDay(s)}, ${s.time}–${slotEnd(s)} · ${esc(s.group)}</strong><br><span class="level level-${s.level}">${levelLabel(s.level)}</span></p>
+    <div class="form-row">
+      <div><label>Name Eltern / Kontaktperson</label><input id="apParent" value=""></div>
+      <div><label>E-Mail</label><input id="apEmail" type="email" value="${esc(session.email)}"></div>
+      <div><label>Mobile / WhatsApp</label><input id="apMobile"></div>
+      <div><label>Name Kind</label><input id="apChild"></div>
+      <div><label>Jahrgang</label><input id="apBirth" type="number" min="2005" max="2022"></div>
+      <div><label>Spielstärke</label><select id="apLevel">
+        <option value="rot">Rot</option><option value="orange">Orange</option><option value="gruen">Grün</option><option value="wettkampf">Wettkampf</option>
+      </select></div>
+    </div>
+    <div><label>Kommentar / alternative Zeiten</label><textarea id="apComment" placeholder="z.B. Mittwoch bevorzugt, Freitag wäre ebenfalls möglich"></textarea></div>
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="submitApplication('${slotId}')">Bewerbung senden</button></div>`);
+  document.getElementById("apLevel").value=s.level;
+}
+async function submitApplication(slotId){
+  const row={season_id:currentSeason(),slot_id:slotId,parent_name:document.getElementById("apParent").value.trim(),
+    mobile:document.getElementById("apMobile").value.trim(),child:document.getElementById("apChild").value.trim(),
+    birth_year:Number(document.getElementById("apBirth").value)||null,level:document.getElementById("apLevel").value,
+    comment:document.getElementById("apComment").value.trim()};
+  if(!row.parent_name||!row.child){alert("Bitte Name Eltern und Kind ausfüllen.");return;}
+  try{await writeRow("training_applications",row,"insert");closeModal();await refreshUI();alert("Bewerbung in Supabase gespeichert.");}
+  catch(e){showDbError(e);}
+}
+
+function renderMyApps(){
+  const apps=db.applications.filter(a=>a.season===currentSeason());
+  const moves=db.moves.filter(m=>m.status==="pending"&&apps.some(a=>a.id===m.applicationId));
+  const movesHtml=moves.length?`<h3>Verschiebung bestätigen</h3>${moves.map(m=>{
+    const a=apps.find(x=>x.id===m.applicationId),from=db.slots.find(x=>x.id===m.fromSlotId),to=db.slots.find(x=>x.id===m.toSlotId);
+    return `<div class="move-pending"><strong>${esc(a?.child||"")}</strong><p>Bisher: ${esc(slotDay(from||{}))} ${esc(from?.time||"")}–${esc(from?slotEnd(from):"")} · ${esc(from?.group||"")}</p><p>Neu: ${esc(slotDay(to||{}))} ${esc(to?.time||"")}–${esc(to?slotEnd(to):"")} · ${esc(to?.group||"")}</p><button class="btn btn-primary btn-sm" onclick="answerMove('${m.id}',true)">Bestätigen</button> <button class="btn btn-danger btn-sm" onclick="answerMove('${m.id}',false)">Ablehnen</button></div>`;
+  }).join("")}`:"";
+  document.getElementById("content").innerHTML=`<div class="card"><h2>Meine Bewerbungen</h2>${!moveTableAvailable?`<div class="notice">Verschiebungsanfragen sind momentan nicht verfügbar.</div>`:""}${movesHtml}${apps.length?applicationTable(apps,false):`<p class="muted">Noch keine Bewerbungen vorhanden.</p>`}</div>`;
+}
+function renderProfile(){
+  document.getElementById("content").innerHTML=`<div class="grid grid-2">
+    <div class="card"><h2>Bestehendes Clubmitglied</h2><p class="muted">In der echten Lösung wird nach E-Mail oder Mobile in Clubdesk gesucht und das Kind ausgewählt.</p>
+      <label>E-Mail oder Mobile suchen</label><input placeholder="name@example.ch oder +41 ...">
+      <button class="btn btn-secondary" style="margin-top:10px" onclick="alert('Demo: Clubdesk-Suche würde hier ausgeführt.')">In Clubdesk suchen</button>
+    </div>
+    <div class="card"><h2>Neuer Interessent</h2><p class="muted">Neue Kontaktdaten werden beim Bewerben automatisch erfasst. Optional könnten sie an Silvan gemeldet oder via API direkt in Clubdesk geschrieben werden.</p>
+      <button class="btn btn-primary" onclick="setTab('week')">Training auswählen</button>
+    </div></div>`;
+}
+
+function renderApplications(){
+  if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Bitte zuerst als Admin eine Trainingsperiode anlegen.</div>";return;}
+  const apps=db.applications.filter(a=>a.season===currentSeason());
+  const pending=apps.filter(a=>a.status==="pending").length;
+  const accepted=apps.filter(a=>a.status==="accepted").length;
+  const other=apps.length-pending-accepted;
+  document.getElementById("content").innerHTML=`<div class="grid grid-3" style="margin-bottom:18px">
+    <div class="kpi">Offen<strong>${pending}</strong></div><div class="kpi">Akzeptiert<strong>${accepted}</strong></div><div class="kpi">Verschoben / Abgelehnt<strong>${other}</strong></div>
+  </div><div class="card"><h2>Bewerbungen ${esc(seasonObj().name)}</h2>${applicationTable(apps,true)}</div>`;
+}
+function applicationTable(apps,withActions){
+  if(!apps.length) return `<p class="muted">Keine Bewerbungen vorhanden.</p>`;
+  return `<div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Kontakt</th><th>Wunschslot</th><th>Status</th><th>Kommentar</th>${withActions?"<th>Aktion</th>":""}</tr></thead><tbody>
+  ${apps.map(a=>{
+    const s=db.slots.find(x=>x.id===a.slotId);
+    return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">Jg. ${a.birthYear||"-"} · ${levelLabel(a.level)}</span></td>
+      <td>${esc(a.parentName)}<br><span class="muted">${esc(a.email)}<br>${esc(a.mobile)}</span></td>
+      <td>${s?`${slotDay(s)} · ${s.time}–${slotEnd(s)}<br><span class="muted">${esc(s.group)} · ${levelLabel(s.level)}</span>`:"Slot gelöscht"}</td>
+      <td><span class="status s-${a.status}">${({pending:"Offen",accepted:"Akzeptiert",rejected:"Abgelehnt",moved:"Verschoben"})[a.status]||a.status}</span></td>
+      <td><span class="muted">${esc(a.comment||"-")}<br>${a.coachComment?`Coach: ${esc(a.coachComment)}`:""}</span></td>
+      ${withActions?`<td><button class="btn btn-sm btn-primary" onclick="reviewApplication('${a.id}')">Bearbeiten</button></td>`:""}
+    </tr>`;
+  }).join("")}</tbody></table></div>`;
+}
+function reviewApplication(id){
+  const a=db.applications.find(x=>x.id===id);
+  const current=db.slots.find(x=>x.id===a.slotId);
+  const alternatives=db.slots.filter(s=>s.season===a.season);
+  openModal(`<h2>Bewerbung bearbeiten</h2>
+    <p><strong>${esc(a.child)}</strong> · ${esc(a.parentName)}<br><span class="muted">${esc(a.email)} · ${esc(a.mobile)}</span></p>
+    <div class="form-row">
+      <div><label>Status</label><select id="rvStatus">
+        <option value="pending">Offen</option><option value="accepted">Akzeptiert</option><option value="moved">Verschoben</option><option value="rejected">Abgelehnt</option>
+      </select></div>
+      <div><label>Trainingsslot</label><select id="rvSlot">${alternatives.map(s=>`<option value="${s.id}">${slotDay(s)} · ${s.time}–${slotEnd(s)} · ${s.group} · ${levelLabel(s.level)}</option>`).join("")}</select></div>
+    </div>
+    <div><label>Kommentar an Eltern</label><textarea id="rvComment">${esc(a.coachComment)}</textarea></div>
+    <div class="notice">Bei bestätigten Teilnehmern erfolgt eine Trainingsverschiebung ausschliesslich über den Wochenplan mit Elternbestätigung. Ein automatischer E-Mail-Versand ist noch nicht eingerichtet.</div>
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" onclick="saveReview('${id}')">In Supabase speichern</button></div>`);
+  document.getElementById("rvStatus").value=a.status;
+  document.getElementById("rvSlot").value=current?.id||alternatives[0]?.id;
+}
+async function saveReview(id){
+  const slotId=document.getElementById("rvSlot").value;
+  const status=document.getElementById("rvStatus").value;
+  const comment=document.getElementById("rvComment").value;
+  const original=db.applications.find(a=>a.id===id);
+  if(original?.status==="accepted" && slotId!==original.slotId){alert("Bestätigte Teilnehmer bitte über den Wochenplan verschieben. Die Eltern müssen zuerst zustimmen.");return;}
+  try{
+    const {error}=await authClient.from("training_applications").update({slot_id:slotId,status,coach_comment:comment}).eq("id",id);if(error)throw error;
+    // update() mit Objekt und id-Filter ist notwendig; siehe direkte Abfrage unten.
+  }catch(e){showDbError(e);return;}
+  closeModal();await refreshUI();alert("In Supabase gespeichert. Es wurde keine E-Mail versendet.");
+}
+
+function renderParticipants(){
+  const apps=db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted");
+  document.getElementById("content").innerHTML=`<div class="card"><h2>Bestätigte Teilnehmer</h2>${applicationTable(apps,false)}</div>`;
+}
+
+// Letzte Eingaben des Formulars je Trainingsperiode im Browser behalten.
+const trainingFields=["Title","Day","Start","End","Capacity","Level","Cost","Coach"];
+function trainingDraftKey(){return "tck_training_draft_v14_"+currentSeason();}
+function getTrainingDraft(){
+  try{return JSON.parse(localStorage.getItem(trainingDraftKey())||"null")||{};}
+  catch(e){return {};}
+}
+function rememberTrainingDraft(){
+  const draft={};
+  for(const field of trainingFields){
+    const el=document.getElementById("tr"+field);
+    if(!el)return;
+    draft[field]=el.value;
+  }
+  try{localStorage.setItem(trainingDraftKey(),JSON.stringify(draft));}catch(e){console.warn("Formulareingaben konnten nicht lokal gespeichert werden.",e);}
+}
+// Eingaben auch vor dem Speichern merken (z.B. bei Tab-Wechsel oder Neuladen).
+document.addEventListener("input",e=>{if(e.target?.id?.startsWith("tr")&&trainingFields.includes(e.target.id.slice(2)))rememberTrainingDraft();});
+document.addEventListener("change",e=>{if(e.target?.id?.startsWith("tr")&&trainingFields.includes(e.target.id.slice(2)))rememberTrainingDraft();});
+function trainingForm(s=null){
+  const id=s?.id||"";
+  const prefix=id?"editTr":"tr";
+  const draft=s?{}:getTrainingDraft();
+  const remembered=(key,fallback)=>s?fallback:(draft[key]??fallback);
+  const option=(v,selected)=>`<option value="${v}" ${v===selected?"selected":""}>${v}</option>`;
+  return `<div class="form-row">
+    <div><label>Trainingstitel</label><input id="${prefix}Title" maxlength="120" value="${esc(remembered("Title",s?.group||""))}" placeholder="z. B. Junioren Kids"></div>
+    <div><label>Wochentag</label><select id="${prefix}Day">${trainingDays.map(d=>option(d,remembered("Day",s?.day||"Montag"))).join("")}</select></div>
+    <div><label>Beginn</label><input id="${prefix}Start" type="time" value="${esc(remembered("Start",s?.time||"16:00"))}"></div>
+    <div><label>Ende</label><input id="${prefix}End" type="time" value="${esc(remembered("End",s?slotEnd(s):"17:00"))}"></div>
+    <div><label>Max. Teilnehmer</label><input id="${prefix}Capacity" type="number" min="1" step="1" value="${remembered("Capacity",s?.capacity||8)}"></div>
+    <div><label>Spielstärke</label><select id="${prefix}Level">${[["rot","Rot"],["orange","Orange"],["gruen","Grün"],["wettkampf","Wettkampf"]].map(([v,t])=>`<option value="${v}" ${v===(remembered("Level",s?.level||"rot"))?"selected":""}>${t}</option>`).join("")}</select></div>
+    <div><label>Preis pro Einheit (CHF)</label><input id="${prefix}Cost" type="number" min="0" step="0.01" value="${remembered("Cost",Number(s?.cost??0))}"></div>
+    <div><label>Trainer</label><input id="${prefix}Coach" maxlength="120" value="${esc(remembered("Coach",s?.coach||""))}" placeholder="z. B. Philippe"></div>
+  </div><p class="muted">Das Training findet während der gewählten Trainingsperiode jede Woche statt.</p>
+  <button class="btn btn-primary" onclick="saveTraining('${id}','${prefix}')">${id?"Änderungen speichern":"Training hinzufügen"}</button>`;
+}
+function renderSetup(){
+  const slots=db.slots.filter(s=>s.season===currentSeason()).sort((a,b)=>trainingDays.indexOf(slotDay(a))-trainingDays.indexOf(slotDay(b))||a.time.localeCompare(b.time));
+  if(!db.seasons.length){document.getElementById("content").innerHTML=`<div class="card"><h2>Keine Trainingsperiode vorhanden</h2><button class="btn btn-primary" onclick="createSeason()">Trainingsperiode anlegen</button></div>`;return;}
+  document.getElementById("content").innerHTML=`<div class="grid grid-2">
+    <div class="card"><h2>Trainingsperiode</h2>
+      <div class="form-row"><div><label>Name</label><input id="seName" value="${esc(seasonObj().name)}"></div><div><label>Typ</label><select id="seType"><option>Sommer</option><option>Winter</option></select></div></div>
+      <label><input id="seOpen" type="checkbox" style="width:auto" ${seasonObj().registrationOpen?"checked":""}> Anmeldung offen</label>
+      <button class="btn btn-secondary" onclick="saveSeason()">Periode speichern</button>
+      <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+      <h3>Neue Trainingsperiode</h3><button class="btn btn-primary" onclick="createSeason()">Neue Saison anlegen</button>
+    </div>
+    <div class="card"><h2>Neues Training anlegen</h2>${trainingForm()}</div>
+  </div><br><div class="card"><h2>Bestehende Trainings</h2><div style="overflow:auto"><table><thead><tr><th>Tag / Zeit</th><th>Titel</th><th>Spielstärke</th><th>Plätze</th><th>Preis / Einheit</th><th>Trainer</th><th>Rhythmus</th><th>Aktionen</th></tr></thead><tbody>
+    ${slots.map(s=>`<tr><td>${esc(slotDay(s))}<br><strong>${esc(s.time)}–${esc(slotEnd(s))}</strong></td><td>${esc(s.group)}</td><td>${esc(levelLabel(s.level))}</td><td>${s.participants}/${s.capacity}</td><td>CHF ${Number(s.cost||0).toFixed(2)}</td><td>${esc(s.coach||"–")}</td><td>${s.recurring?"Wöchentlich":esc(slotDate(s))}</td><td><button class="btn btn-sm btn-secondary" onclick="editTraining('${s.id}')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="deleteSlot('${s.id}')">Löschen</button></td></tr>`).join("")||`<tr><td colspan="8">Noch keine Trainings vorhanden.</td></tr>`}
+  </tbody></table></div></div>`;
+  document.getElementById("seType").value=seasonObj().type;
+}
+function openWeekCreate(day,time){
+  if(session.role!=="admin")return;
+  openModal(`<h2>Training erstellen</h2><p class="muted">${esc(day)} · ${esc(time)} · ${esc(seasonObj()?.name||"")}</p>${trainingForm()}<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button></div>`);
+  document.getElementById("trDay").value=day;
+  document.getElementById("trStart").value=time;
+  const hour=Number(time.slice(0,2));document.getElementById("trEnd").value=`${String(hour+1).padStart(2,"0")}:00`;
+}
+function openMoveDialog(applicationId){
+  if(session.role!=="admin")return;
+  const a=db.applications.find(a=>a.id===applicationId);if(!a)return;
+  const source=db.slots.find(s=>s.id===a.slotId);
+  const targets=db.slots.filter(s=>s.season===a.season&&s.id!==a.slotId&&s.participants+db.moves.filter(m=>m.toSlotId===s.id&&m.status==="pending").length<s.capacity);
+  openModal(`<h2>Teilnehmer verschieben</h2><p><strong>${esc(a.child)}</strong><br>Aktuell: ${esc(source?.group||"")} · ${esc(source?.day||"")} ${esc(source?.time||"")}</p>
+    ${targets.length?`<label>Neues Training</label><select id="moveTarget">${targets.map(s=>`<option value="${esc(s.id)}">${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(s.group)} · ${esc(levelLabel(s.level))} (${s.capacity-s.participants} frei)</option>`).join("")}</select>`:`<p class="muted">Kein Training mit freien Plätzen vorhanden.</p>`}
+    <div class="notice" style="margin-top:12px">Die Verschiebung wird erst nach Bestätigung durch die Eltern definitiv. Bis dahin bleibt das Kind im bisherigen Training.</div>
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>${targets.length?`<button class="btn btn-primary" onclick="requestMove('${a.id}',document.getElementById('moveTarget').value)">Bestätigung anfordern</button>`:""}</div>`);
+}
+async function requestMove(applicationId,toSlotId){
+  if(session.role!=="admin")return;
+  if(!moveTableAvailable){alert("Bitte zuerst die beiliegende SQL-Erweiterung in Supabase ausführen.");return;}
+  const a=db.applications.find(a=>a.id===applicationId),to=db.slots.find(s=>s.id===toSlotId);
+  if(!a||a.status!=="accepted"||!to||a.season!==to.season||a.slotId===toSlotId)return alert("Ungültige Verschiebung.");
+  if(db.moves.some(m=>m.applicationId===applicationId&&m.status==="pending"))return alert("Für dieses Kind ist bereits eine Bestätigung offen.");
+  if(to.participants+db.moves.filter(m=>m.toSlotId===toSlotId&&m.status==="pending").length>=to.capacity)return alert("Im Zieltraining ist kein Platz mehr frei.");
+  try{
+    const {error}=await authClient.rpc("training_request_move",{p_application_id:applicationId,p_to_slot_id:toSlotId});if(error)throw error;
+    closeModal();await refreshUI();alert("Verschiebung angefragt. Die Eltern können unter «Meine Bewerbungen» bestätigen oder ablehnen. Ein automatischer E-Mail-Versand ist nicht eingerichtet.");
+  }catch(e){showDbError(e);}
+}
+async function answerMove(id,accept){
+  if(session.role!=="parent")return;
+  if(!confirm(accept?"Verschiebung verbindlich bestätigen?":"Verschiebung ablehnen?"))return;
+  try{const {error}=await authClient.rpc("training_answer_move",{p_move_id:id,p_accept:accept});if(error)throw error;await refreshUI();alert(accept?"Verschiebung bestätigt.":"Verschiebung abgelehnt.");}
+  catch(e){showDbError(e);}
+}
+function editTraining(id){const s=db.slots.find(x=>x.id===id);if(!s)return;openModal(`<h2>Training bearbeiten</h2>${trainingForm(s)}<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button></div>`);}
+async function saveTraining(id="",prefix="tr"){
+  const val=k=>document.getElementById(prefix+k).value.trim();
+  const title=val("Title"),day=val("Day"),start=val("Start"),end=val("End"),capacity=Number(val("Capacity"));
+  if(!title||!start||!end||!trainingDays.includes(day)||!Number.isSafeInteger(capacity)||capacity<1){alert("Bitte alle Angaben korrekt ausfüllen.");return;}
+  if(end<=start){alert("Die Endzeit muss nach der Startzeit liegen.");return;}
+  const cost=Number(val("Cost"));
+  if(!Number.isFinite(cost)||cost<0){alert("Bitte einen gültigen Preis in CHF eingeben.");return;}
+  const duration=(Number(end.slice(0,2))*60+Number(end.slice(3)))-(Number(start.slice(0,2))*60+Number(start.slice(3)));
+  const existing=id?db.slots.find(x=>x.id===id):null;
+  if(existing&&capacity<existing.participants){alert("Die Teilnehmerzahl darf nicht kleiner als die bestätigten Plätze sein.");return;}
+  const row={title,day,training_time:start,end_time:end,duration,capacity,cost,coach:val("Coach"),level:val("Level"),is_recurring:true,training_date:null,group_name:title};
+  try{
+    if(id){const {error}=await authClient.from("training_slots").update(row).eq("id",id);if(error)throw error;}
+    else await writeRow("training_slots",{...row,season_id:currentSeason()},"insert");
+    if(!id)rememberTrainingDraft();
+    closeModal();await refreshUI();
+  }catch(e){showDbError(e);}
+}
+async function saveSeason(){
+  const s=seasonObj();if(!s)return;
+  try{await writeRow("training_seasons",{id:s.id,name:document.getElementById("seName").value,type:document.getElementById("seType").value,registration_open:document.getElementById("seOpen").checked});await refreshUI();}
+  catch(e){showDbError(e);}
+}
+async function createSeason(){
+  try{const {data,error}=await authClient.from("training_seasons").insert({name:"Neue Trainingsperiode",type:"Sommer",registration_open:false}).select("id").single();if(error)throw error;await refreshUI();document.getElementById("seasonSelect").value=data.id;renderSetup();}
+  catch(e){showDbError(e);}
+}
+
+async function deleteSlot(id){
+  if(!confirm("Training wirklich löschen? Das ist nur ohne bestehende Bewerbungen möglich."))return;
+  try{const {error}=await authClient.from("training_slots").delete().eq("id",id);if(error)throw error;await refreshUI();}catch(e){showDbError(e);}
+}
+
+function renderContacts(){
+  db.contacts=db.applications.map(a=>({child:a.child,parentName:a.parentName,email:a.email,mobile:a.mobile,level:a.level,source:"Supabase Bewerbung"}));
+  document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Clubdesk-Import / neue Interessenten</span></div><button class="btn btn-secondary" onclick="alert('Demo: CSV/API Import aus Clubdesk')">Clubdesk-Import</button></div>
+  <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Stufe</th><th>Quelle</th></tr></thead><tbody>
+  ${db.contacts.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td>${levelLabel(c.level)}</td><td>${esc(c.source)}</td></tr>`).join("")}
+  </tbody></table></div></div>`;
+}
+function renderExport(){
+  if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Keine Trainingsperiode vorhanden.</div>";return;}
+  const accepted=db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted");
+  const revenue=accepted.reduce((sum,a)=>{const s=db.slots.find(x=>x.id===a.slotId);return sum+(s?.cost||0)},0);
+  document.getElementById("content").innerHTML=`<div class="grid grid-2"><div class="card"><h2>Abrechnung / Excel-Export</h2>
+    <p>Bestätigte Anmeldungen: <strong>${accepted.length}</strong><br>Planbarer Rechnungsbetrag: <strong>CHF ${revenue}</strong></p>
+    <button class="btn btn-primary" onclick="exportCSV()">CSV für Excel exportieren</button>
+    <p class="muted">Der Export enthält Eltern, Kind, Kontakt, Trainingsslot, Spielstärke und Betrag. In einer produktiven Lösung kann daraus eine direkte Clubdesk-Rechnungserfassung werden.</p>
+  </div><div class="card"><h2>Clubdesk-Integration</h2>
+    <p class="muted">Vorgesehene Schnittstellen:</p>
+    <ul><li>Bestehende Juniorenkontakte importieren / suchen</li><li>Neue Interessenten an Clubdesk übergeben</li><li>Bestätigte Trainings für Rechnungsstellung übertragen</li><li>Optional E-Mail-Versand über Clubdesk oder separaten Maildienst</li></ul>
+  </div></div>`;
+}
+function exportCSV(){
+  const rows=[["Saison","Kind","Eltern","E-Mail","Mobile","Spielstärke","Datum","Tag","Beginn","Ende","Trainingstitel","Coach","Betrag CHF","Status"]];
+  db.applications.filter(a=>a.season===currentSeason()&&a.status==="accepted").forEach(a=>{
+    const s=db.slots.find(x=>x.id===a.slotId)||{};
+    rows.push([seasonObj().name,a.child,a.parentName,a.email,a.mobile,levelLabel(a.level),s.date||"",slotDay(s),s.time||"",slotEnd(s),s.group||"",s.coach||"",s.cost||0,a.status]);
+  });
+  const csv="\ufeff"+rows.map(r=>r.map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(";")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=`TCK_${currentSeason()}_Abrechnung.csv`;a.click();URL.revokeObjectURL(a.href);
+}
+function openInfo(){
+  openModal(`<h2>Spielstärken & Trainingsinformationen</h2>
+    <p><span class="level level-rot">Rot</span> Einstieg / Red Court: spielerischer Aufbau, kurze Felder und altersgerechte Bälle.</p>
+    <p><span class="level level-orange">Orange</span> Orange Court: Technik, Ballwechsel und erste taktische Elemente.</p>
+    <p><span class="level level-gruen">Grün</span> Green Court: Übergang zum ganzen Feld, technisch und taktisch fortgeschritten.</p>
+    <p><span class="level level-wettkampf">Wettkampf</span> Für Juniorinnen und Junioren mit Turnier- und Wettkampffokus.</p>
+    <div class="notice">Die definitiven Definitionen, Trainingsbedingungen und Kosten können hier später mit euren Club-Informationen verlinkt werden.</div>
+    <div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+}
+function openModal(html){document.getElementById("modalBox").innerHTML=html;document.getElementById("modal").classList.remove("hidden")}
+function closeModal(){document.getElementById("modal").classList.add("hidden")}
+function closeModalOutside(e){if(e.target.id==="modal")closeModal()}
+
+if(authClient){
+  authClient.auth.onAuthStateChange((event, authSession)=>{
+    if(event==="PASSWORD_RECOVERY"){
+      setTimeout(()=>openSetPassword("recovery"),0);
+    }
+  });
+  window.addEventListener("load", restoreSupabaseSession);
+}
+
+document.addEventListener("click",e=>{
+  const entry=document.getElementById("staffEntry");
+  const menu=document.getElementById("staffMenu");
+  if(entry && menu && !entry.contains(e.target)) menu.classList.add("hidden");
+});
+document.addEventListener("keydown",e=>{
+  if(e.key==="Escape"){
+    document.getElementById("staffMenu")?.classList.add("hidden");
+    closeModal();
+  }
+});
+</script>
+</body>
+</html>
