@@ -715,25 +715,44 @@ function renderProfile(){
     </div></div>`;
 }
 
+let applicationStatusFilter="all";
+function setApplicationStatusFilter(value){applicationStatusFilter=value;renderApplications();}
+function applicationMove(a){return db.moves.find(m=>m.applicationId===a.id&&m.status==="pending");}
+function applicationMoveNotice(apps){
+  const pendingMoves=db.moves.filter(m=>m.status==="pending"&&apps.some(a=>a.id===m.applicationId));
+  return `<div class="card" style="margin-bottom:18px"><h3 style="margin-bottom:8px">Ausstehende Verschiebungen (${pendingMoves.length})</h3>
+    ${!moveTableAvailable?`<div class="notice">Verschiebungsanfragen konnten nicht geladen werden. Bitte Supabase-Berechtigungen prüfen.</div>`:""}
+    ${pendingMoves.length?pendingMoves.map(m=>{const a=apps.find(x=>x.id===m.applicationId),from=db.slots.find(x=>x.id===m.fromSlotId),to=db.slots.find(x=>x.id===m.toSlotId);
+      return `<div class="move-pending"><strong>${esc(a?.child||"Teilnehmer")}</strong>: ${esc(from?slotDay(from):"–")} ${esc(from?.time||"")} (${esc(from?.group||"")}) → ${esc(to?slotDay(to):"–")} ${esc(to?.time||"")} (${esc(to?.group||"")}) · <strong>Elternbestätigung offen</strong></div>`;
+    }).join(""):`<p class="muted">Keine offenen Verschiebungsanfragen.</p>`}</div>`;
+}
 function renderApplications(){
   if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Bitte zuerst als Admin eine Trainingsperiode anlegen.</div>";return;}
   const apps=db.applications.filter(a=>a.season===currentSeason());
   const pending=apps.filter(a=>a.status==="pending").length;
   const accepted=apps.filter(a=>a.status==="accepted").length;
   const other=apps.length-pending-accepted;
-  document.getElementById("content").innerHTML=`<div class="grid grid-3" style="margin-bottom:18px">
-    <div class="kpi">Offen<strong>${pending}</strong></div><div class="kpi">Akzeptiert<strong>${accepted}</strong></div><div class="kpi">Verschoben / Abgelehnt<strong>${other}</strong></div>
-  </div><div class="card"><h2>Bewerbungen ${esc(seasonObj().name)}</h2>${applicationTable(apps,true)}</div>`;
+  const awaiting=apps.filter(a=>!!applicationMove(a)).length;
+  const filterButtons=[["all","Alle",apps.length],["pending","Offen",pending],["accepted","Akzeptiert",accepted],["awaiting","Bestätigung offen",awaiting],["other","Verschoben / Abgelehnt",other]];
+  const filtered=apps.filter(a=>applicationStatusFilter==="all"||
+    (applicationStatusFilter==="awaiting"?!!applicationMove(a):
+    applicationStatusFilter==="other"?!["pending","accepted"].includes(a.status):a.status===applicationStatusFilter));
+  document.getElementById("content").innerHTML=`<div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr));margin-bottom:18px">
+    <div class="kpi">Offen<strong>${pending}</strong></div><div class="kpi">Akzeptiert<strong>${accepted}</strong></div><div class="kpi">Bestätigung offen<strong>${awaiting}</strong></div><div class="kpi">Verschoben / Abgelehnt<strong>${other}</strong></div>
+  </div>${applicationMoveNotice(apps)}<div class="card"><h2>Bewerbungen ${esc(seasonObj().name)}</h2>
+    <div class="tabs" style="margin-bottom:12px">${filterButtons.map(([key,label,count])=>`<button class="tab ${applicationStatusFilter===key?"active":""}" onclick="setApplicationStatusFilter('${key}')">${label} (${count})</button>`).join("")}</div>
+    ${applicationTable(filtered,true)}</div>`;
 }
 function applicationTable(apps,withActions){
-  if(!apps.length) return `<p class="muted">Keine Bewerbungen vorhanden.</p>`;
+  if(!apps.length) return `<p class="muted">Keine Bewerbungen in dieser Auswahl vorhanden.</p>`;
   return `<div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Kontakt</th><th>Wunschslot</th><th>Status</th><th>Kommentar</th>${withActions?"<th>Aktion</th>":""}</tr></thead><tbody>
   ${apps.map(a=>{
-    const s=db.slots.find(x=>x.id===a.slotId);
-    return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">Jg. ${a.birthYear||"-"} · ${levelLabel(a.level)}</span></td>
+    const s=db.slots.find(x=>x.id===a.slotId),move=applicationMove(a);
+    const destination=move?db.slots.find(x=>x.id===move.toSlotId):null;
+    return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">Jg. ${a.birthYear||"-"} · ${esc(levelLabel(a.level))}</span></td>
       <td>${esc(a.parentName)}<br><span class="muted">${esc(a.email)}<br>${esc(a.mobile)}</span></td>
-      <td>${s?`${slotDay(s)} · ${s.time}–${slotEnd(s)}<br><span class="muted">${esc(s.group)} · ${levelLabel(s.level)}</span>`:"Slot gelöscht"}</td>
-      <td><span class="status s-${a.status}">${({pending:"Offen",accepted:"Akzeptiert",rejected:"Abgelehnt",moved:"Verschoben"})[a.status]||a.status}</span></td>
+      <td>${s?`${esc(slotDay(s))} · ${esc(s.time)}–${esc(slotEnd(s))}<br><span class="muted">${esc(s.group)} · ${esc(levelLabel(s.level))}</span>`:"Slot gelöscht"}${move&&destination?`<div class="muted" style="margin-top:6px">Beantragt → ${esc(slotDay(destination))} ${esc(destination.time)}–${esc(slotEnd(destination))} · ${esc(destination.group)}</div>`:""}</td>
+      <td><span class="status s-${esc(a.status)}">${({pending:"Offen",accepted:"Akzeptiert",rejected:"Abgelehnt",moved:"Verschoben"})[a.status]||esc(a.status)}</span>${move?`<div style="margin-top:6px"><span class="status s-pending">Bestätigung offen</span></div>`:""}</td>
       <td><span class="muted">${esc(a.comment||"-")}<br>${a.coachComment?`Coach: ${esc(a.coachComment)}`:""}</span></td>
       ${withActions?`<td><button class="btn btn-sm btn-primary" onclick="reviewApplication('${a.id}')">Bearbeiten</button></td>`:""}
     </tr>`;
@@ -763,6 +782,7 @@ async function saveReview(id){
   const comment=document.getElementById("rvComment").value;
   const original=db.applications.find(a=>a.id===id);
   if(original?.status==="accepted" && slotId!==original.slotId){alert("Bestätigte Teilnehmer bitte über den Wochenplan verschieben. Die Eltern müssen zuerst zustimmen.");return;}
+  if(applicationMove(original) && (slotId!==original.slotId || status!==original.status)){alert("Elternbestätigung offen: Training und Status dürfen bis zur Entscheidung nicht geändert werden.");return;}
   try{
     const {error}=await authClient.from("training_applications").update({slot_id:slotId,status,coach_comment:comment}).eq("id",id);if(error)throw error;
     // update() mit Objekt und id-Filter ist notwendig; siehe direkte Abfrage unten.
