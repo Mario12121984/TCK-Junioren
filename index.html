@@ -678,7 +678,7 @@ async function openSlotParticipants(slotId){
   openModal(`<h2>${esc(s.group)} – Teilnehmer</h2><p class="muted">${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(levelLabel(s.level))} · Trainer: ${esc(s.coach||"–")}</p>
     <div class="notice">${s.participants}/${s.capacity} Plätze belegt</div>
     ${apps.length||assignedRows?`<div style="overflow:auto"><table><thead><tr><th>Teilnehmer</th><th>Jahrgang</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${apps.map(a=>{const isPending=pending.some(m=>m.applicationId===a.id);return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">${esc(a.parentName||"")}</span></td><td><strong>${esc(a.birthYear??"–")}</strong></td><td>${isPending?`<span class="status s-pending">Elternbestätigung offen</span>`:`<span class="status s-accepted">Bestätigt</span>`}</td><td>${session.role==="admin"?`<button class="btn btn-sm btn-secondary" ${isPending?"disabled":""} onclick="openMoveDialog('${a.id}')">Verschieben</button>`:"–"}</td></tr>`}).join("")}${assignedRows}</tbody></table></div>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}
-    <div class="modal-actions">${session.role==="admin"?`<button class="btn btn-primary" onclick="openAssignContact('${s.id}')">+ Kind aus Kontakte zuweisen</button>`:""}${session.role==="admin"?`<button class="btn btn-secondary" onclick="editTraining('${s.id}')">Training bearbeiten</button>`:""}<button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+    <div class="modal-actions">${session.role==="admin"?`<button class="btn btn-primary" onclick="openAssignContact('${s.id}')">+ Kind aus Kontakte zuweisen</button>`:""}${session.role==="admin"?`<button class="btn btn-secondary" onclick="editTraining('${s.id}')">Training bearbeiten</button><button class="btn btn-danger" onclick="deleteSlot('${s.id}')">Training löschen</button>`:""}<button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
 }
 function openAssignContact(slotId){
   if(session.role!=="admin")return;
@@ -1019,8 +1019,19 @@ async function createSeason(){
 }
 
 async function deleteSlot(id){
-  if(!confirm("Training wirklich löschen? Das ist nur ohne bestehende Bewerbungen möglich."))return;
-  try{const {error}=await authClient.from("training_slots").delete().eq("id",id);if(error)throw error;await refreshUI();}catch(e){showDbError(e);}
+  if(session.role!=="admin")return;
+  const slot=db.slots.find(s=>String(s.id)===String(id));if(!slot)return;
+  const applications=db.applications.filter(a=>a.slotId===id);
+  const direct=db.assignments.filter(a=>a.slot_id===id);
+  const description=`${slotDay(slot)} ${slot.time}–${slotEnd(slot)} · ${slot.group}`;
+  if(!confirm(`Trainingseinheit wirklich löschen?\n\n${description}\n${applications.length} Bewerbungen und ${direct.length} direkte Zuweisungen sind betroffen.\n\nDie Trainingseinheit und ihre Bewerbungen/Zuweisungen werden unwiderruflich gelöscht. Die eigenständigen Juniorenkontakte bleiben bestehen.`))return;
+  const confirmation=prompt(`LETZTE BESTÄTIGUNG\n\nUm die Trainingseinheit «${description}» endgültig zu löschen, gib bitte LÖSCHEN ein:`);
+  if(confirmation!=="LÖSCHEN"){if(confirmation!==null)alert("Löschen abgebrochen. Bitte exakt LÖSCHEN eingeben.");return;}
+  try{
+    const {error}=await authClient.rpc("tck_admin_delete_training_slot",{p_slot_id:id});
+    if(error)throw error;
+    closeModal();await refreshUI();alert("Trainingseinheit und zugehörige Einteilungen wurden gelöscht. Juniorenkontakte bleiben erhalten.");
+  }catch(e){showDbError(e);}
 }
 
 function renderContacts(){
