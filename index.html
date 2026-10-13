@@ -919,11 +919,40 @@ async function deleteSlot(id){
 }
 
 function renderContacts(){
-  db.contacts=db.applications.map(a=>({child:a.child,parentName:a.parentName,email:a.email,mobile:a.mobile,birthYear:a.birthYear,level:a.level,source:"Supabase Bewerbung"}));
-  document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Clubdesk-Import / neue Interessenten</span></div><button class="btn btn-secondary" onclick="alert('Demo: CSV/API Import aus Clubdesk')">Clubdesk-Import</button></div>
-  <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Jahrgang</th><th>Stufe</th><th>Quelle</th></tr></thead><tbody>
-  ${db.contacts.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td>${esc(c.birthYear??"–")}</td><td>${levelLabel(c.level)}</td><td>${esc(c.source)}</td></tr>`).join("")}
+  if(session.role!=="admin")return;
+  db.contacts=db.applications.map(a=>({...a}));
+  document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Kontaktdaten aus Supabase-Bewerbungen · Änderungen gelten für die jeweilige Bewerbung</span></div><button class="btn btn-secondary" onclick="alert('Clubdesk-Import ist noch nicht implementiert.')">Clubdesk-Import</button></div>
+  <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Jahrgang</th><th>Stufe</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Aktion</th></tr></thead><tbody>
+  ${db.contacts.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.birthYear??"–")}</td><td>${esc(levelLabel(c.level))}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td><button class="btn btn-sm btn-secondary" onclick="editContact('${esc(c.id)}')">Bearbeiten</button></td></tr>`).join("")}
   </tbody></table></div></div>`;
+}
+function editContact(id){
+  if(session.role!=="admin")return;
+  const c=db.applications.find(a=>String(a.id)===String(id));if(!c)return;
+  openModal(`<h2>Juniorenkontakt bearbeiten</h2><p class="muted">Die Änderungen werden in der zugehörigen Supabase-Bewerbung gespeichert.</p>
+  <div class="form-row">
+  <div><label>Kind</label><input id="ctChild" value="${esc(c.child)}"></div>
+  <div><label>Jahrgang</label><input id="ctBirth" type="number" min="1990" max="2100" value="${esc(c.birthYear??"")}"></div>
+  <div><label>Stufe</label><select id="ctLevel">${["rot","orange","gruen","wettkampf"].map(v=>`<option value="${v}" ${c.level===v?"selected":""}>${levelLabel(v)}</option>`).join("")}</select></div>
+  <div><label>Eltern</label><input id="ctParent" value="${esc(c.parentName)}"></div>
+  <div><label>E-Mail</label><input id="ctEmail" type="email" value="${esc(c.email)}"></div>
+  <div><label>Mobile</label><input id="ctMobile" type="tel" value="${esc(c.mobile)}"></div>
+  </div><div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" id="ctSave" onclick="saveContact('${esc(c.id)}')">Speichern</button></div>`);
+}
+async function saveContact(id){
+  if(session.role!=="admin")return;
+  const val=x=>document.getElementById(x).value.trim();
+  const year=Number(val("ctBirth"));
+  const fields={p_id:id,p_child:val("ctChild"),p_birth_year:year,p_level:val("ctLevel"),p_parent_name:val("ctParent"),p_email:val("ctEmail"),p_mobile:val("ctMobile")};
+  if(!fields.p_child||!fields.p_parent_name||!fields.p_email||!fields.p_email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)||!Number.isInteger(year)||year<1990||year>new Date().getFullYear()){
+    alert("Bitte Kind, Eltern, gültige E-Mail und einen gültigen Jahrgang eingeben.");return;
+  }
+  const button=document.getElementById("ctSave");button.disabled=true;
+  try{
+    const {error}=await authClient.rpc("training_admin_update_contact",fields);
+    if(error)throw error;
+    closeModal();await refreshUI();alert("Kontakt gespeichert.");
+  }catch(e){showDbError(e);button.disabled=false;}
 }
 function renderExport(){
   if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Keine Trainingsperiode vorhanden.</div>";return;}
