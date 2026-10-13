@@ -286,7 +286,7 @@ const seed = {
   ]
 };
 
-let db = {seasons:[],slots:[],applications:[],contacts:[],moves:[]};
+let db = {seasons:[],slots:[],applications:[],contacts:[],moves:[],assignments:[]};
 let moveTableAvailable=true;
 let session = {role:null,email:null,tab:null};
 
@@ -312,6 +312,13 @@ async function reloadData(){
     const {data:contactRows,error:contactError}=await authClient.from("training_junior_contacts").select("*");
     if(contactError)throw contactError;
     db.contacts=(contactRows||[]).map(c=>({id:c.id,child:c.child,birthYear:c.birth_year,level:c.level,parentName:c.parent_name,email:c.email,mobile:c.mobile,standalone:true}));
+  }
+  db.assignments=[];
+  if(session.role==="admin"){
+    const {data:assigned,error:assignedError}=await authClient.from("training_contact_assignments").select("*");
+    if(assignedError)throw assignedError;
+    db.assignments=assigned||[];
+    for(const slot of db.slots)slot.participants+=db.assignments.filter(a=>a.slot_id===slot.id).length;
   }
   const {data:moveRows,error:moveError}=await authClient.from("training_move_requests").select("*");
   if(moveError){
@@ -666,11 +673,39 @@ async function openSlotParticipants(slotId){
   }
   const apps=db.applications.filter(a=>a.slotId===slotId&&a.status==="accepted");
   const pending=db.moves.filter(m=>m.fromSlotId===slotId&&m.status==="pending");
+  const assigned=db.assignments.filter(a=>a.slot_id===slotId);
+  const assignedRows=assigned.map(a=>{const c=db.contacts.find(x=>x.id===a.contact_id);return c?`<tr><td><strong>${esc(c.child)}</strong><br><span class="muted">${esc(c.parentName||"")}</span></td><td>${esc(c.birthYear??"–")}</td><td><span class="status s-accepted">Direkt zugewiesen</span></td><td>${session.role==="admin"?`<button class="btn btn-sm btn-danger" onclick="removeContactAssignment('${a.id}','${slotId}')">Entfernen</button>`:"–"}</td></tr>`:"";}).join("");
   openModal(`<h2>${esc(s.group)} – Teilnehmer</h2><p class="muted">${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(levelLabel(s.level))} · Trainer: ${esc(s.coach||"–")}</p>
-    <div class="notice">${apps.length}/${s.capacity} Plätze belegt</div>
-    ${apps.length?`<div style="overflow:auto"><table><thead><tr><th>Teilnehmer</th><th>Jahrgang</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${apps.map(a=>{const isPending=pending.some(m=>m.applicationId===a.id);return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">${esc(a.parentName||"")}</span></td><td><strong>${esc(a.birthYear??"–")}</strong></td><td>${isPending?`<span class="status s-pending">Elternbestätigung offen</span>`:`<span class="status s-accepted">Bestätigt</span>`}</td><td>${session.role==="admin"?`<button class="btn btn-sm btn-secondary" ${isPending?"disabled":""} onclick="openMoveDialog('${a.id}')">Verschieben</button>`:"–"}</td></tr>`}).join("")}</tbody></table></div>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}
-    <div class="modal-actions">${session.role==="admin"?`<button class="btn btn-secondary" onclick="editTraining('${s.id}')">Training bearbeiten</button>`:""}<button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+    <div class="notice">${s.participants}/${s.capacity} Plätze belegt</div>
+    ${apps.length||assignedRows?`<div style="overflow:auto"><table><thead><tr><th>Teilnehmer</th><th>Jahrgang</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${apps.map(a=>{const isPending=pending.some(m=>m.applicationId===a.id);return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">${esc(a.parentName||"")}</span></td><td><strong>${esc(a.birthYear??"–")}</strong></td><td>${isPending?`<span class="status s-pending">Elternbestätigung offen</span>`:`<span class="status s-accepted">Bestätigt</span>`}</td><td>${session.role==="admin"?`<button class="btn btn-sm btn-secondary" ${isPending?"disabled":""} onclick="openMoveDialog('${a.id}')">Verschieben</button>`:"–"}</td></tr>`}).join("")}${assignedRows}</tbody></table></div>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}
+    <div class="modal-actions">${session.role==="admin"?`<button class="btn btn-primary" onclick="openAssignContact('${s.id}')">+ Kind aus Kontakte zuweisen</button>`:""}${session.role==="admin"?`<button class="btn btn-secondary" onclick="editTraining('${s.id}')">Training bearbeiten</button>`:""}<button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
 }
+function openAssignContact(slotId){
+  if(session.role!=="admin")return;
+  const slot=db.slots.find(s=>s.id===slotId);if(!slot)return;
+  const used=new Set(db.assignments.filter(a=>a.slot_id===slotId).map(a=>a.contact_id));
+  const accepted=db.applications.filter(a=>a.slotId===slotId&&a.status==="accepted");
+  const options=db.contacts.filter(c=>!used.has(c.id)&&!accepted.some(a=>a.child.trim().toLowerCase()===c.child.trim().toLowerCase()&&a.birthYear===c.birthYear)).sort((a,b)=>a.child.localeCompare(b.child,"de"));
+  openModal(`<h2>Kind zum Training zuweisen</h2><p class="muted">${esc(slotDay(slot))} ${esc(slot.time)} · ${esc(slot.group)} · ${slot.participants}/${slot.capacity} belegt</p>
+    ${options.length?`<label>Kind aus Kontakte</label><select id="assignContactId">${options.map(c=>`<option value="${esc(c.id)}">${esc(c.child)} · Jg. ${esc(c.birthYear??"–")} · ${esc(levelLabel(c.level))}</option>`).join("")}</select><p class="muted">Die Zuweisung erfolgt direkt, ohne neue Bewerbung. Spielstärke bitte überprüfen.</p>`:`<p class="notice">Keine weiteren eigenständigen Kontakte verfügbar. Kinder, die nur in Bewerbungen stehen, müssen zuerst als eigenständiger Kontakt importiert werden.</p>`}
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="openSlotParticipants('${slotId}')">Zurück</button>${options.length?`<button class="btn btn-primary" id="assignSave" onclick="saveContactAssignment('${slotId}')">Zuweisen</button>`:""}</div>`);
+}
+async function saveContactAssignment(slotId){
+  if(session.role!=="admin")return;
+  const contactId=document.getElementById("assignContactId")?.value;
+  if(!contactId)return;
+  const btn=document.getElementById("assignSave");btn.disabled=true;
+  try{
+    const {error}=await authClient.from("training_contact_assignments").insert({slot_id:slotId,contact_id:contactId});
+    if(error)throw error;
+    await refreshUI();openSlotParticipants(slotId);
+  }catch(e){showDbError(e);btn.disabled=false;}
+}
+async function removeContactAssignment(id,slotId){
+  if(session.role!=="admin"||!confirm("Dieses Kind aus der Trainingseinheit entfernen? Der Kontakt bleibt bestehen."))return;
+  try{const {error}=await authClient.from("training_contact_assignments").delete().eq("id",id);if(error)throw error;await refreshUI();openSlotParticipants(slotId);}catch(e){showDbError(e);}
+}
+
 function applyForSlot(slotId){
   const s=db.slots.find(x=>x.id===slotId);
   if(!s)return;
