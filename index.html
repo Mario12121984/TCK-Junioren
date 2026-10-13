@@ -705,14 +705,57 @@ function renderMyApps(){
   document.getElementById("content").innerHTML=`<div class="card"><h2>Meine Bewerbungen</h2>${!moveTableAvailable?`<div class="notice">Verschiebungsanfragen sind momentan nicht verfügbar.</div>`:""}${movesHtml}${apps.length?applicationTable(apps,false):`<p class="muted">Noch keine Bewerbungen vorhanden.</p>`}</div>`;
 }
 function renderProfile(){
-  document.getElementById("content").innerHTML=`<div class="grid grid-2">
-    <div class="card"><h2>Bestehendes Clubmitglied</h2><p class="muted">In der echten Lösung wird nach E-Mail oder Mobile in Clubdesk gesucht und das Kind ausgewählt.</p>
-      <label>E-Mail oder Mobile suchen</label><input placeholder="name@example.ch oder +41 ...">
-      <button class="btn btn-secondary" style="margin-top:10px" onclick="alert('Demo: Clubdesk-Suche würde hier ausgeführt.')">In Clubdesk suchen</button>
-    </div>
-    <div class="card"><h2>Neuer Interessent</h2><p class="muted">Neue Kontaktdaten werden beim Bewerben automatisch erfasst. Optional könnten sie an Silvan gemeldet oder via API direkt in Clubdesk geschrieben werden.</p>
-      <button class="btn btn-primary" onclick="setTab('week')">Training auswählen</button>
-    </div></div>`;
+  if(session.role!=="parent")return;
+  // Supabase RLS must limit training_applications to the signed-in parent's records.
+  const apps=db.applications.slice().sort((a,b)=>a.child.localeCompare(b.child,"de"));
+  const grouped=new Map();
+  for(const a of apps){
+    const key=[a.child.trim().toLocaleLowerCase(),a.birthYear||""].join("|");
+    if(!grouped.has(key))grouped.set(key,[]);
+    grouped.get(key).push(a);
+  }
+  document.getElementById("content").innerHTML=`<div class="card"><h2>Meine Kinder & Kontaktdaten</h2>
+    <p class="muted">Hier sehen Sie die Kinder Ihrer Bewerbungen und können die Angaben bearbeiten. Änderungen gelten jeweils für die ausgewählte Bewerbung.</p>
+    ${grouped.size?[...grouped.values()].map(group=>{
+      const a=group[0];
+      return `<div style="border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:12px">
+        <h3 style="margin-bottom:6px">${esc(a.child)} <span class="muted">· Jahrgang ${esc(a.birthYear??"–")}</span></h3>
+        <p class="muted">Stufe: ${esc(levelLabel(a.level))} · Eltern: ${esc(a.parentName)}<br>E-Mail: ${esc(a.email)} · Mobile: ${esc(a.mobile||"–")}</p>
+        ${group.map(item=>{const slot=db.slots.find(s=>s.id===item.slotId);
+          return `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:10px;margin-top:10px"><span class="muted">${esc(db.seasons.find(s=>s.id===item.season)?.name||"Trainingsperiode")} · ${esc(slot?slotDay(slot)+" "+slot.time:"Bewerbung")}</span><button class="btn btn-sm btn-secondary" onclick="editParentContact('${item.id}')">Angaben bearbeiten</button></div>`;
+        }).join("")}
+      </div>`;
+    }).join(""):`<p class="muted">Für diesen Zugang wurden noch keine Kinder mit einer Bewerbung gefunden.</p>`}
+    <p class="footer-note">Die Login-E-Mail wird hier nicht geändert. Für eine Änderung der Anmelde-E-Mail ist eine gesonderte Verifizierung erforderlich.</p>
+  </div>`;
+}
+function editParentContact(id){
+  if(session.role!=="parent")return;
+  const a=db.applications.find(x=>String(x.id)===String(id));if(!a)return;
+  openModal(`<h2>Kind / Kontakt bearbeiten</h2><p class="muted">Angaben zur Bewerbung von ${esc(a.child)} ändern.</p>
+    <div class="form-row">
+      <div><label>Kind</label><input id="pcChild" value="${esc(a.child)}"></div>
+      <div><label>Jahrgang</label><input id="pcBirth" type="number" min="1990" max="${new Date().getFullYear()}" value="${esc(a.birthYear??"")}"></div>
+      <div><label>Stufe</label><select id="pcLevel">${["rot","orange","gruen","wettkampf"].map(v=>`<option value="${v}" ${a.level===v?"selected":""}>${esc(levelLabel(v))}</option>`).join("")}</select></div>
+      <div><label>Eltern / Kontaktperson</label><input id="pcParent" value="${esc(a.parentName)}"></div>
+      <div><label>E-Mail (Login)</label><input value="${esc(a.email)}" disabled></div>
+      <div><label>Mobile</label><input id="pcMobile" type="tel" value="${esc(a.mobile||"")}"></div>
+    </div><p class="muted">Eine Änderung der Spielstärke ändert nicht automatisch die Trainingseinteilung.</p>
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button><button class="btn btn-primary" id="pcSave" onclick="saveParentContact('${a.id}')">Speichern</button></div>`);
+}
+async function saveParentContact(id){
+  if(session.role!=="parent")return;
+  const val=x=>document.getElementById(x).value.trim();
+  const year=Number(val("pcBirth"));
+  const args={p_id:id,p_child:val("pcChild"),p_birth_year:year,p_level:val("pcLevel"),p_parent_name:val("pcParent"),p_mobile:val("pcMobile")};
+  if(!args.p_child||!args.p_parent_name||!Number.isInteger(year)||year<1990||year>new Date().getFullYear()){
+    alert("Bitte Name, Kontaktperson und einen gültigen Jahrgang eingeben.");return;
+  }
+  const button=document.getElementById("pcSave");button.disabled=true;
+  try{
+    const {error}=await authClient.rpc("training_parent_update_contact",args);if(error)throw error;
+    closeModal();await refreshUI();alert("Änderungen gespeichert.");
+  }catch(e){showDbError(e);button.disabled=false;}
 }
 
 let applicationStatusFilter="all";
