@@ -993,7 +993,7 @@ function renderContacts(){
   const combined=[...db.applications.map(a=>({...a,standalone:false})),...db.contacts];
   document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Kontakte aus Bewerbungen und eigenständige Kontakte aus Supabase</span></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary" onclick="exportContactsCSV()">Kontakte exportieren</button><button class="btn btn-primary" onclick="document.getElementById('contactsImportFile').click()">Kontakte importieren</button><input id="contactsImportFile" class="hidden" type="file" accept=".csv,text/csv" onchange="importContactsCSV(event)"></div></div>
   <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Jahrgang</th><th>Stufe</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Aktion</th></tr></thead><tbody>
-  ${combined.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.birthYear??"–")}</td><td>${esc(levelLabel(c.level))}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td><button class="btn btn-sm btn-secondary" onclick="editContact('${esc(c.id)}')">Bearbeiten</button></td></tr>`).join("")}
+  ${combined.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.birthYear??"–")}</td><td>${esc(levelLabel(c.level))}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td><button class="btn btn-sm btn-secondary" onclick="editContact('${esc(c.id)}',${c.standalone?'true':'false'})">Bearbeiten</button> ${c.standalone?`<button class="btn btn-sm btn-danger" onclick="deleteContact('${esc(c.id)}')">Löschen</button>`:`<span class="muted" title="Dieser Eintrag gehört zu einer Trainingsbewerbung">Bewerbung</span>`}</td></tr>`).join("")}
   </tbody></table></div></div>`;
 }
 // CSV-Kontaktabgleich: nur vorhandene Bewerbungen aktualisieren, keine Trainingsanmeldungen erzeugen.
@@ -1066,14 +1066,14 @@ async function importContactsCSV(event){
     if(skipped.length||errors.length)alert([...skipped,...errors].slice(0,12).join("\n"));
   }catch(e){alert("Import fehlgeschlagen: "+e.message);}
 }
-function editContact(id){
+function editContact(id,standalone=true){
   if(session.role!=="admin")return;
-  const c=db.contacts.find(a=>String(a.id)===String(id));if(!c)return;
+  const c=standalone?db.contacts.find(a=>String(a.id)===String(id)):db.applications.find(a=>String(a.id)===String(id));if(!c)return;
   openModal(`<h2>Juniorenkontakt bearbeiten</h2><p class="muted">Die Änderungen werden direkt in Supabase gespeichert.</p>
   <div class="form-row">
   <div><label>Kind</label><input id="ctChild" value="${esc(c.child)}"></div>
   <div><label>Jahrgang</label><input id="ctBirth" type="number" min="1990" max="2100" value="${esc(c.birthYear??"")}"></div>
-  <div><label>Stufe</label><select id="ctLevel">${["rot","orange","gruen","wettkampf"].map(v=>`<option value="${v}" ${c.level===v?"selected":""}>${levelLabel(v)}</option>`).join("")}</select></div>
+  <div><label>Stufe</label><select id="ctLevel"><option value="" ${!c.level?"selected":""}>Nicht angegeben</option>${["rot","orange","gruen","wettkampf"].map(v=>`<option value="${v}" ${c.level===v?"selected":""}>${levelLabel(v)}</option>`).join("")}</select></div>
   <div><label>Eltern</label><input id="ctParent" value="${esc(c.parentName)}"></div>
   <div><label>E-Mail</label><input id="ctEmail" type="email" value="${esc(c.email)}"></div>
   <div><label>Mobile</label><input id="ctMobile" type="tel" value="${esc(c.mobile)}"></div>
@@ -1091,11 +1091,23 @@ async function saveContact(id){
   try{
     const existing=db.contacts.find(c=>String(c.id)===String(id));
     const {error}=existing?.standalone
-      ? await authClient.from("training_junior_contacts").update({child:fields.p_child,birth_year:fields.p_birth_year,level:fields.p_level,parent_name:fields.p_parent_name||null,email:fields.p_email||null,mobile:fields.p_mobile}).eq("id",id)
+      ? await authClient.from("training_junior_contacts").update({child:fields.p_child,birth_year:fields.p_birth_year,level:fields.p_level||null,parent_name:fields.p_parent_name||null,email:fields.p_email||null,mobile:fields.p_mobile}).eq("id",id)
       : await authClient.rpc("training_admin_update_contact",fields);
     if(error)throw error;
     closeModal();await refreshUI();alert("Kontakt gespeichert.");
   }catch(e){showDbError(e);button.disabled=false;}
+}
+async function deleteContact(id){
+  if(session.role!=="admin")return;
+  const c=db.contacts.find(x=>String(x.id)===String(id));
+  if(!c||!c.standalone){alert("Nur eigenständige Juniorenkontakte können hier gelöscht werden. Trainingsbewerbungen bleiben geschützt.");return;}
+  if(!confirm(`Kontakt «${c.child}» (Jg. ${c.birthYear??"–"}) dauerhaft aus Supabase löschen?\n\nDies kann nicht rückgängig gemacht werden. Bestehende Trainingsbewerbungen und Login-Konten werden nicht gelöscht.`))return;
+  try{
+    const {data,error}=await authClient.from("training_junior_contacts").delete().eq("id",id).select("id");
+    if(error)throw error;
+    if(!data?.length)throw Error("Kein Kontakt gelöscht. Bitte Admin-Berechtigungen und SQL-Richtlinie prüfen.");
+    await refreshUI();alert("Juniorenkontakt gelöscht.");
+  }catch(e){showDbError(e);}
 }
 function renderExport(){
   if(!db.seasons.length){document.getElementById("content").innerHTML="<div class=notice>Keine Trainingsperiode vorhanden.</div>";return;}
