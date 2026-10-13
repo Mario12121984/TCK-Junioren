@@ -67,6 +67,12 @@
     .slot{
       border:1px solid #d6e7df;border-radius:12px;padding:10px;margin:4px 0;background:#f7fbf9
     }
+    .week-cell.admin-cell{cursor:pointer;position:relative;min-height:100px}
+    .week-cell.admin-cell:hover{background:#f0f8f3}
+    .week-add{border:1px dashed #a8cdbb;background:#f4fbf7;color:#176347;border-radius:8px;padding:5px 9px;font-size:12px;font-weight:700;margin-top:6px}
+    .slot.interactive{cursor:pointer}
+    .slot.interactive:hover{box-shadow:0 3px 12px #0001;border-color:#75b89b}
+    .move-pending{background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px;margin:7px 0;font-size:12px}
     .slot.full{border-color:#fecaca;background:#fff7f7}
     .slot .slot-title{display:flex;justify-content:space-between;gap:8px;font-weight:800;margin-bottom:4px}
     .slot .meta{font-size:12px;color:var(--muted);line-height:1.5}
@@ -280,7 +286,8 @@ const seed = {
   ]
 };
 
-let db = {seasons:[],slots:[],applications:[],contacts:[]};
+let db = {seasons:[],slots:[],applications:[],contacts:[],moves:[]};
+let moveTableAvailable=true;
 let session = {role:null,email:null,tab:null};
 
 // V10: Alle Trainings- und Bewerbungsdaten kommen ausschliesslich aus Supabase.
@@ -671,7 +678,7 @@ async function submitApplication(slotId){
 
 function renderMyApps(){
   const apps=db.applications;
-  document.getElementById("content").innerHTML=`<div class="card"><h2>Meine Bewerbungen</h2>${apps.length?applicationTable(apps,false):`<p class="muted">Noch keine Bewerbung mit ${esc(session.email)} erfasst.</p>`}</div>`;
+  document.getElementById("content").innerHTML=`<div class="card"><h2>Meine Bewerbungen</h2>${movesHtml}${apps.length?applicationTable(apps,false):`<p class="muted">Noch keine Bewerbung mit ${esc(session.email)} erfasst.</p>`}</div>`;
 }
 function renderProfile(){
   document.getElementById("content").innerHTML=`<div class="grid grid-2">
@@ -795,6 +802,41 @@ function renderSetup(){
     ${slots.map(s=>`<tr><td>${esc(slotDay(s))}<br><strong>${esc(s.time)}–${esc(slotEnd(s))}</strong></td><td>${esc(s.group)}</td><td>${esc(levelLabel(s.level))}</td><td>${s.participants}/${s.capacity}</td><td>CHF ${Number(s.cost||0).toFixed(2)}</td><td>${esc(s.coach||"–")}</td><td>${s.recurring?"Wöchentlich":esc(slotDate(s))}</td><td><button class="btn btn-sm btn-secondary" onclick="editTraining('${s.id}')">Bearbeiten</button> <button class="btn btn-sm btn-danger" onclick="deleteSlot('${s.id}')">Löschen</button></td></tr>`).join("")||`<tr><td colspan="8">Noch keine Trainings vorhanden.</td></tr>`}
   </tbody></table></div></div>`;
   document.getElementById("seType").value=seasonObj().type;
+}
+function openWeekCreate(day,time){
+  if(session.role!=="admin")return;
+  openModal(`<h2>Training erstellen</h2><p class="muted">${esc(day)} · ${esc(time)} · ${esc(seasonObj()?.name||"")}</p>${trainingForm()}<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button></div>`);
+  document.getElementById("trDay").value=day;
+  document.getElementById("trStart").value=time;
+  const hour=Number(time.slice(0,2));document.getElementById("trEnd").value=`${String(hour+1).padStart(2,"0")}:00`;
+}
+function openMoveDialog(applicationId){
+  if(session.role!=="admin")return;
+  const a=db.applications.find(a=>a.id===applicationId);if(!a)return;
+  const source=db.slots.find(s=>s.id===a.slotId);
+  const targets=db.slots.filter(s=>s.season===a.season&&s.id!==a.slotId&&s.participants+db.moves.filter(m=>m.toSlotId===s.id&&m.status==="pending").length<s.capacity);
+  openModal(`<h2>Teilnehmer verschieben</h2><p><strong>${esc(a.child)}</strong><br>Aktuell: ${esc(source?.group||"")} · ${esc(source?.day||"")} ${esc(source?.time||"")}</p>
+    ${targets.length?`<label>Neues Training</label><select id="moveTarget">${targets.map(s=>`<option value="${esc(s.id)}">${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(s.group)} · ${esc(levelLabel(s.level))} (${s.capacity-s.participants} frei)</option>`).join("")}</select>`:`<p class="muted">Kein Training mit freien Plätzen vorhanden.</p>`}
+    <div class="notice" style="margin-top:12px">Die Verschiebung wird erst nach Bestätigung durch die Eltern definitiv. Bis dahin bleibt das Kind im bisherigen Training.</div>
+    <div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button>${targets.length?`<button class="btn btn-primary" onclick="requestMove('${a.id}',document.getElementById('moveTarget').value)">Bestätigung anfordern</button>`:""}</div>`);
+}
+async function requestMove(applicationId,toSlotId){
+  if(session.role!=="admin")return;
+  if(!moveTableAvailable){alert("Bitte zuerst die beiliegende SQL-Erweiterung in Supabase ausführen.");return;}
+  const a=db.applications.find(a=>a.id===applicationId),to=db.slots.find(s=>s.id===toSlotId);
+  if(!a||a.status!=="accepted"||!to||a.season!==to.season||a.slotId===toSlotId)return alert("Ungültige Verschiebung.");
+  if(db.moves.some(m=>m.applicationId===applicationId&&m.status==="pending"))return alert("Für dieses Kind ist bereits eine Bestätigung offen.");
+  if(to.participants+db.moves.filter(m=>m.toSlotId===toSlotId&&m.status==="pending").length>=to.capacity)return alert("Im Zieltraining ist kein Platz mehr frei.");
+  try{
+    const {error}=await authClient.rpc("training_request_move",{p_application_id:applicationId,p_to_slot_id:toSlotId});if(error)throw error;
+    closeModal();await refreshUI();alert("Verschiebung angefragt. Die Eltern können unter «Meine Bewerbungen» bestätigen oder ablehnen. Ein automatischer E-Mail-Versand ist nicht eingerichtet.");
+  }catch(e){showDbError(e);}
+}
+async function answerMove(id,accept){
+  if(session.role!=="parent")return;
+  if(!confirm(accept?"Verschiebung verbindlich bestätigen?":"Verschiebung ablehnen?"))return;
+  try{const {error}=await authClient.rpc("training_answer_move",{p_move_id:id,p_accept:accept});if(error)throw error;await refreshUI();alert(accept?"Verschiebung bestätigt.":"Verschiebung abgelehnt.");}
+  catch(e){showDbError(e);}
 }
 function editTraining(id){const s=db.slots.find(x=>x.id===id);if(!s)return;openModal(`<h2>Training bearbeiten</h2>${trainingForm(s)}<div class="modal-actions"><button class="btn btn-secondary" onclick="closeModal()">Abbrechen</button></div>`);}
 async function saveTraining(id="",prefix="tr"){
