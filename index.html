@@ -654,16 +654,16 @@ async function openSlotParticipants(slotId){
   if(session.role==="parent"){
     openModal("<h2>Teilnehmer dieser Trainingseinheit</h2><p>Lade bestätigte Teilnehmer …</p>");
     try{
-      const {data,error}=await authClient.rpc("training_participant_names",{p_slot_id:slotId});if(error)throw error;
-      const names=(data||[]).map(x=>String(x.child_name||"").trim()).filter(Boolean);
-      openModal(`<h2>Teilnehmer dieser Trainingseinheit</h2><p><strong>${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(s.group)}</strong></p><div class="notice">${s.participants}/${s.capacity} Plätze belegt</div>${names.length?`<ol>${names.map(n=>`<li>${esc(n)}</li>`).join("")}</ol>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}<p class="muted">Es werden nur Namen angezeigt.</p><div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
+      const {data,error}=await authClient.rpc("training_participant_details",{p_slot_id:slotId});if(error)throw error;
+      const participants=(data||[]).filter(x=>String(x.child_name||"").trim());
+      openModal(`<h2>Teilnehmer dieser Trainingseinheit</h2><p><strong>${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(s.group)}</strong></p><div class="notice">${s.participants}/${s.capacity} Plätze belegt</div>${participants.length?`<ol>${participants.map(p=>`<li>${esc(p.child_name)} · Jg. ${esc(p.birth_year??"–")}</li>`).join("")}</ol>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}<p class="muted">Es werden nur Namen und Jahrgänge angezeigt.</p><div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
     }catch(e){closeModal();showDbError(e);}return;
   }
   const apps=db.applications.filter(a=>a.slotId===slotId&&a.status==="accepted");
   const pending=db.moves.filter(m=>m.fromSlotId===slotId&&m.status==="pending");
   openModal(`<h2>${esc(s.group)} – Teilnehmer</h2><p class="muted">${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(levelLabel(s.level))} · Trainer: ${esc(s.coach||"–")}</p>
     <div class="notice">${apps.length}/${s.capacity} Plätze belegt</div>
-    ${apps.length?`<div style="overflow:auto"><table><thead><tr><th>Teilnehmer</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${apps.map(a=>{const isPending=pending.some(m=>m.applicationId===a.id);return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">${esc(a.parentName||"")}</span></td><td>${isPending?`<span class="status s-pending">Elternbestätigung offen</span>`:`<span class="status s-accepted">Bestätigt</span>`}</td><td>${session.role==="admin"?`<button class="btn btn-sm btn-secondary" ${isPending?"disabled":""} onclick="openMoveDialog('${a.id}')">Verschieben</button>`:"–"}</td></tr>`}).join("")}</tbody></table></div>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}
+    ${apps.length?`<div style="overflow:auto"><table><thead><tr><th>Teilnehmer / Jahrgang</th><th>Status</th><th>Aktion</th></tr></thead><tbody>${apps.map(a=>{const isPending=pending.some(m=>m.applicationId===a.id);return `<tr><td><strong>${esc(a.child)}</strong><br><span class="muted">Jg. ${esc(a.birthYear??"–")} · ${esc(a.parentName||"")}</span></td><td>${isPending?`<span class="status s-pending">Elternbestätigung offen</span>`:`<span class="status s-accepted">Bestätigt</span>`}</td><td>${session.role==="admin"?`<button class="btn btn-sm btn-secondary" ${isPending?"disabled":""} onclick="openMoveDialog('${a.id}')">Verschieben</button>`:"–"}</td></tr>`}).join("")}</tbody></table></div>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}
     <div class="modal-actions">${session.role==="admin"?`<button class="btn btn-secondary" onclick="editTraining('${s.id}')">Training bearbeiten</button>`:""}<button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
 }
 function applyForSlot(slotId){
@@ -919,10 +919,10 @@ async function deleteSlot(id){
 }
 
 function renderContacts(){
-  db.contacts=db.applications.map(a=>({child:a.child,parentName:a.parentName,email:a.email,mobile:a.mobile,level:a.level,source:"Supabase Bewerbung"}));
+  db.contacts=db.applications.map(a=>({child:a.child,parentName:a.parentName,email:a.email,mobile:a.mobile,birthYear:a.birthYear,level:a.level,source:"Supabase Bewerbung"}));
   document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Clubdesk-Import / neue Interessenten</span></div><button class="btn btn-secondary" onclick="alert('Demo: CSV/API Import aus Clubdesk')">Clubdesk-Import</button></div>
-  <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Stufe</th><th>Quelle</th></tr></thead><tbody>
-  ${db.contacts.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td>${levelLabel(c.level)}</td><td>${esc(c.source)}</td></tr>`).join("")}
+  <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Jahrgang</th><th>Stufe</th><th>Quelle</th></tr></thead><tbody>
+  ${db.contacts.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td>${esc(c.birthYear??"–")}</td><td>${levelLabel(c.level)}</td><td>${esc(c.source)}</td></tr>`).join("")}
   </tbody></table></div></div>`;
 }
 function renderExport(){
