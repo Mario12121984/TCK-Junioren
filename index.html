@@ -308,6 +308,11 @@ async function reloadData(){
     for(const slot of db.slots)slot.participants=db.applications.filter(a=>a.slotId===slot.id&&a.status==="accepted").length;
   }
   db.contacts=[];
+  if(session.role==="admin"){
+    const {data:contactRows,error:contactError}=await authClient.from("training_junior_contacts").select("*");
+    if(contactError)throw contactError;
+    db.contacts=(contactRows||[]).map(c=>({id:c.id,child:c.child,birthYear:c.birth_year,level:c.level,parentName:c.parent_name,email:c.email,mobile:c.mobile,standalone:true}));
+  }
   const {data:moveRows,error:moveError}=await authClient.from("training_move_requests").select("*");
   if(moveError){
     moveTableAvailable=false;db.moves=[];
@@ -985,16 +990,78 @@ async function deleteSlot(id){
 
 function renderContacts(){
   if(session.role!=="admin")return;
-  db.contacts=db.applications.map(a=>({...a}));
-  document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Kontaktdaten aus Supabase-Bewerbungen · Änderungen gelten für die jeweilige Bewerbung</span></div><button class="btn btn-secondary" onclick="alert('Clubdesk-Import ist noch nicht implementiert.')">Clubdesk-Import</button></div>
+  const combined=[...db.applications.map(a=>({...a,standalone:false})),...db.contacts];
+  db.contacts=combined;
+  document.getElementById("content").innerHTML=`<div class="card"><div class="toolbar"><div><h2 style="margin:0">Juniorenkontakte</h2><span class="muted">Kontakte aus Bewerbungen und eigenständige Kontakte aus Supabase</span></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-secondary" onclick="exportContactsCSV()">Kontakte exportieren</button><button class="btn btn-primary" onclick="document.getElementById('contactsImportFile').click()">Kontakte importieren</button><input id="contactsImportFile" class="hidden" type="file" accept=".csv,text/csv" onchange="importContactsCSV(event)"></div></div>
   <div style="overflow:auto"><table><thead><tr><th>Kind</th><th>Jahrgang</th><th>Stufe</th><th>Eltern</th><th>E-Mail</th><th>Mobile</th><th>Aktion</th></tr></thead><tbody>
   ${db.contacts.map(c=>`<tr><td>${esc(c.child)}</td><td>${esc(c.birthYear??"–")}</td><td>${esc(levelLabel(c.level))}</td><td>${esc(c.parentName)}</td><td>${esc(c.email)}</td><td>${esc(c.mobile)}</td><td><button class="btn btn-sm btn-secondary" onclick="editContact('${esc(c.id)}')">Bearbeiten</button></td></tr>`).join("")}
   </tbody></table></div></div>`;
 }
+// CSV-Kontaktabgleich: nur vorhandene Bewerbungen aktualisieren, keine Trainingsanmeldungen erzeugen.
+function contactCsvCell(v){return '"'+String(v??"").replaceAll('"','""')+'"';}
+function exportContactsCSV(){
+  if(session.role!=="admin")return;
+  const rows=[["ID","Kind","Jahrgang","Stufe","Eltern","E-Mail","Mobile"],...db.contacts.map(a=>[a.standalone?"":a.id,a.child,a.birthYear??"",levelLabel(a.level),a.parentName,a.email,a.mobile])];
+  const csv="\ufeff"+rows.map(r=>r.map(contactCsvCell).join(";")).join("\r\n");
+  const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));
+  const link=document.createElement("a");link.href=url;link.download="TCK_Juniorenkontakte.csv";link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+function parseContactsCSV(text){
+  text=text.replace(/^\ufeff/,"");
+  const delimiter=(text.split(/\r?\n/,1)[0].match(/;/g)||[]).length >= (text.split(/\r?\n/,1)[0].match(/,/g)||[]).length?";":",";
+  const rows=[],row=[];let cell="",quoted=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(c==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}
+    else if(c===delimiter&&!quoted){row.push(cell);cell="";}
+    else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&text[i+1]==='\n')i++;row.push(cell);if(row.some(x=>x.trim()))rows.push([...row]);row.length=0;cell="";}
+    else cell+=c;
+  }
+  if(quoted)throw Error("CSV enthält ein nicht geschlossenes Anführungszeichen.");
+  row.push(cell);if(row.some(x=>x.trim()))rows.push(row);
+  return rows;
+}
+async function importContactsCSV(event){
+  if(session.role!=="admin")return;
+  const input=event.target,file=input.files?.[0];input.value="";if(!file)return;
+  try{
+    const rows=parseContactsCSV(await file.text());if(rows.length<2)throw Error("CSV enthält keine Kontakte.");
+    const norm=x=>String(x||"").trim().toLocaleLowerCase("de").replace(/[-_ ]/g,"");
+    const headers=rows.shift().map(norm);
+    const col=(...names)=>headers.findIndex(h=>names.map(norm).includes(h));
+    const indices={id:col("ID"),child:col("Kind","Name","Teilnehmer"),year:col("Jahrgang","Geburtsjahr"),level:col("Stufe","Spielstärke"),parent:col("Eltern","Kontaktperson"),email:col("E-Mail","Email"),mobile:col("Mobile","Telefon","Handy")};
+    if(indices.child<0||indices.year<0||indices.parent<0||indices.email<0)throw Error("Benötigte Spalten: Kind, Jahrgang, Eltern, E-Mail.");
+    const get=(r,k)=>indices[k]<0?"":String(r[indices[k]]??"").trim();
+    const updates=[],inserts=[],skipped=[];
+    for(let i=0;i<rows.length;i++){
+      const r=rows[i],name=get(r,"child"),email=get(r,"email"),year=Number(get(r,"year"));
+      const parent=get(r,"parent"),levelText=norm(get(r,"level"));
+      const level=({rot:"rot",orange:"orange",grün:"gruen",gruen:"gruen",wettkampf:"wettkampf"})[levelText]||"rot";
+      if(!name||!parent||!email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)||!Number.isInteger(year)||year<1990||year>new Date().getFullYear()){
+        skipped.push(`Zeile ${i+2}: ungültige Pflichtangaben`);continue;
+      }
+      const matches=indices.id>=0&&get(r,"id")?db.applications.filter(a=>String(a.id)===get(r,"id")):db.applications.filter(a=>norm(a.child)===norm(name)&&norm(a.email)===norm(email));
+      if(matches.length>1){skipped.push(`Zeile ${i+2}: mehrdeutige Bewerbung`);continue;}
+      if(matches.length===1){const old=matches[0];updates.push({p_id:old.id,p_child:name,p_birth_year:year,p_level:level,p_parent_name:parent,p_email:email,p_mobile:indices.mobile>=0?get(r,"mobile"):old.mobile||""});}
+      else inserts.push({child:name,birth_year:year,level,parent_name:parent,email,mobile:get(r,"mobile")});
+    }
+    if(!updates.length&&!inserts.length){alert("Keine gültigen Kontakte gefunden.\n"+skipped.slice(0,8).join("\n"));return;}
+    if(!confirm(`${updates.length} Bewerbungen aktualisieren und ${inserts.length} Kontakte neu anlegen bzw. abgleichen? ${skipped.length} Zeilen werden übersprungen. Es werden keine Trainingsanmeldungen erstellt.`))return;
+    let saved=0,failed=0;
+    for(const fields of updates){const {error}=await authClient.rpc("training_admin_update_contact",fields);if(error){failed++;console.error("Kontaktimport",fields.p_id,error);}else saved++;}
+    let created=0;
+    for(const row of inserts){
+      const existing=db.contacts.find(c=>c.standalone&&norm(c.child)===norm(row.child)&&norm(c.email)===norm(row.email));
+      const result=existing?await authClient.from("training_junior_contacts").update(row).eq("id",existing.id):await authClient.from("training_junior_contacts").insert(row);
+      if(result.error){failed++;console.error("Kontaktimport",row.child,result.error);}else created++;
+    }
+    await refreshUI();alert(`${saved} Bewerbungen aktualisiert, ${created} eigenständige Kontakte gespeichert, ${skipped.length} übersprungen, ${failed} fehlgeschlagen.`+(skipped.length?"\n"+skipped.slice(0,8).join("\n"):""));
+  }catch(e){alert("Import fehlgeschlagen: "+e.message);}
+}
 function editContact(id){
   if(session.role!=="admin")return;
-  const c=db.applications.find(a=>String(a.id)===String(id));if(!c)return;
-  openModal(`<h2>Juniorenkontakt bearbeiten</h2><p class="muted">Die Änderungen werden in der zugehörigen Supabase-Bewerbung gespeichert.</p>
+  const c=db.contacts.find(a=>String(a.id)===String(id));if(!c)return;
+  openModal(`<h2>Juniorenkontakt bearbeiten</h2><p class="muted">Die Änderungen werden direkt in Supabase gespeichert.</p>
   <div class="form-row">
   <div><label>Kind</label><input id="ctChild" value="${esc(c.child)}"></div>
   <div><label>Jahrgang</label><input id="ctBirth" type="number" min="1990" max="2100" value="${esc(c.birthYear??"")}"></div>
@@ -1014,7 +1081,10 @@ async function saveContact(id){
   }
   const button=document.getElementById("ctSave");button.disabled=true;
   try{
-    const {error}=await authClient.rpc("training_admin_update_contact",fields);
+    const existing=db.contacts.find(c=>String(c.id)===String(id));
+    const {error}=existing?.standalone
+      ? await authClient.from("training_junior_contacts").update({child:fields.p_child,birth_year:fields.p_birth_year,level:fields.p_level,parent_name:fields.p_parent_name,email:fields.p_email,mobile:fields.p_mobile}).eq("id",id)
+      : await authClient.rpc("training_admin_update_contact",fields);
     if(error)throw error;
     closeModal();await refreshUI();alert("Kontakt gespeichert.");
   }catch(e){showDbError(e);button.disabled=false;}
