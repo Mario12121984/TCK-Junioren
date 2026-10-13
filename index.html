@@ -300,9 +300,10 @@ async function reloadData(){
   db.seasons=seasons.map(x=>({id:x.id,name:x.name,type:x.type,active:x.active,registrationOpen:x.registration_open}));
   db.slots=slots.map(x=>({id:x.id,season:x.season_id,day:x.day,date:x.training_date,time:x.training_time.slice(0,5),duration:x.duration,group:x.title||x.group_name||"Training",endTime:x.end_time?.slice(0,5)||"",recurring:!!x.is_recurring,level:x.level,capacity:x.capacity,cost:x.cost,coach:x.coach,participants:0}));
   db.applications=apps.map(x=>({id:x.id,season:x.season_id,slotId:x.slot_id,parentName:x.parent_name,email:x.email,mobile:x.mobile,child:x.child,birthYear:x.birth_year,level:x.level,status:x.status,comment:x.comment,coachComment:x.coach_comment,created:x.created_at.slice(0,10)}));
-  // Nur bestätigte Einträge zählen; Eltern erhalten die Belegungszahlen über eine separate, datensparsame RPC.
-  if(session.role==="parent"){
-    const {data,error}=await authClient.rpc("training_slot_counts");if(error)throw error;
+  // V30: Einheitliche Belegungszahlen für Eltern und Coaches, inklusive direkter Zuweisungen.
+  // Die RPC liefert ausschliesslich Slot-ID und Anzahl, keine privaten Kontaktdaten.
+  if(session.role!=="admin"){
+    const {data,error}=await authClient.rpc("tck_public_slot_counts_v30");if(error)throw error;
     for(const item of data||[]){const slot=db.slots.find(s=>s.id===item.slot_id);if(slot)slot.participants=Number(item.confirmed_count);}
   }else{
     for(const slot of db.slots)slot.participants=db.applications.filter(a=>a.slotId===slot.id&&a.status==="accepted").length;
@@ -663,10 +664,10 @@ function slotCard(s){
 async function openSlotParticipants(slotId){
   if(!session.role)return;
   const s=db.slots.find(x=>x.id===slotId);if(!s)return;
-  if(session.role==="parent"){
+  if(session.role==="parent" || session.role==="coach"){
     openModal("<h2>Teilnehmer dieser Trainingseinheit</h2><p>Lade bestätigte Teilnehmer …</p>");
     try{
-      const {data,error}=await authClient.rpc("training_participant_details",{p_slot_id:slotId});if(error)throw error;
+      const {data,error}=await authClient.rpc("tck_public_participant_details_v30",{p_slot_id:slotId});if(error)throw error;
       const participants=(data||[]).filter(x=>String(x.child_name||"").trim());
       openModal(`<h2>Teilnehmer dieser Trainingseinheit</h2><p><strong>${esc(slotDay(s))} ${esc(s.time)}–${esc(slotEnd(s))} · ${esc(s.group)}</strong></p><div class="notice">${s.participants}/${s.capacity} Plätze belegt</div>${participants.length?`<ol>${participants.map(p=>`<li>${esc(p.child_name)} · Jg. ${esc(p.birth_year??"–")}</li>`).join("")}</ol>`:`<p class="muted">Noch keine bestätigten Teilnehmer.</p>`}<p class="muted">Es werden nur Namen und Jahrgänge angezeigt.</p><div class="modal-actions"><button class="btn btn-primary" onclick="closeModal()">Schliessen</button></div>`);
     }catch(e){closeModal();showDbError(e);}return;
